@@ -26,7 +26,7 @@ Repo, strict TS, Vitest, Zod content schema, biome 1 sample content, content val
 - Tests: balanced chain hits expected rates (extractor 1/s → smelter 0.5 ingot/s → 2 bullets/s);
   a bottleneck starves downstream; unpowered smelter produces nothing.
 
-### M0.4 — Towers and ammo
+### M0.4 — Towers and ammo ✅
 - Towers with magazine (20), stated fire rate, range, damage, ammo type; refill from input link.
 - Effective fire rate = min(stated, supply). Empty magazine ⇒ no shots.
 - Tests: fed Gunner fires at stated rate; underfed Gunner fires at supply rate; empty = 0 shots.

@@ -25,10 +25,25 @@ _Update at the end of every session._
     assemblers starves both at 50%; tier-1 cap holds 3 ore/s to 2/s; unpowered / no-coal / out-of-radius
     smelters make nothing; command validation. Total 48 green, typecheck clean.
 
+- **M0.4 done** (towers and ammo):
+  - Towers are factory nodes (`towerId` set) placed with the new `placeTower` command (`canPlaceTower`).
+    Their input buffer **is the magazine** (content `magazine`, 20), shared across ammo types, starts empty
+    and fills only from links. Towers accept only their `ammo` items, have 1 input port and no outputs.
+  - `core/towers.ts`: `stepTowers(state, ctx, dt, engaged?)` runs after `stepFactory`. A cooldown
+    (1 / content `fireRate`) gates shots and each shot spends one whole round, so
+    **effective fire rate = min(stated, supply)** with no special case. Per tower: cumulative `shots`, `cooldown`,
+    status `working` / `starved` (empty) / `idle` (not engaged). Helpers: `loadedAmmo`, `magazineCount`.
+  - `tests/towers.test.ts` (10 tests). Measured over 30 s on scrapyard_1:
+    - **Fed** (2 chains → hub → tier-2 link, 4 bullets/s): **3.00 shots/s** (stated rate).
+    - **Underfed** (1 chain, 2 bullets/s): **2.00 shots/s** (supply rate).
+    - **Empty**: 0 shots, `starved`. A full magazine cut off fires exactly 20 rounds, then stops.
+  - Total 58 green, typecheck clean.
+
 ## Next
 
-**M0.4 — Towers and ammo** (see `docs/build-plan.md`). Prompt in `docs/kickoff-prompts.md`, Session 3.
-Towers become link targets (accept their ammo items); the tests' `drain()` helper is the stand-in until then.
+**M0.5 — Enemies and waves** (see `docs/build-plan.md`). Prompt in `docs/kickoff-prompts.md`, Session 4.
+Replace the `engaged` set with first-along-path targeting in range, apply damage + ammo multipliers, and
+add the single `step(state, input, dt)` entry point (factory → towers → enemies).
 
 ## Decisions so far
 
@@ -45,6 +60,18 @@ Towers become link targets (accept their ammo items); the tests' `drain()` helpe
 - Power radius = **square** (Chebyshev distance ≤ 3), so it highlights cleanly on the grid.
 - Build costs and research locks are **not enforced yet** (no economy in the sim until later milestones).
 - Removing a building destroys its buffered items.
+
+## Decisions in M0.4 (easy to change, flag if wrong)
+
+- Towers live in `FactoryState.nodes` (not a separate list), so links and transport needed no new code paths.
+- Magazine starts **empty**; a freshly built tower does nothing until the factory feeds it.
+- Shots are whole rounds; ammo arrives fractionally, so a tower fires as soon as 1 full round is loaded.
+- **Shots can't be banked**: idle or empty towers' cooldown stops at 0 (no burst from waiting).
+- Towers fire their first listed ammo type that's loaded (matters once a tower takes 2 ammo types).
+- Until M0.5, "engaged" is a set of tower ids passed to `stepTowers` (omitted = all engaged).
+  Damage and range are in content but unused until enemies exist.
+- Tower input ports = 1 (constant in `factoryBuild.ts`). Could move into the tower schema if towers should differ.
+- Tower `utilisation` isn't set (per-tick shots are too noisy). The harness can compute a rate from `shots`.
 
 ## Open questions from M0.2
 
