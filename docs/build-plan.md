@@ -31,7 +31,7 @@ Repo, strict TS, Vitest, Zod content schema, biome 1 sample content, content val
 - Effective fire rate = min(stated, supply). Empty magazine ⇒ no shots.
 - Tests: fed Gunner fires at stated rate; underfed Gunner fires at supply rate; empty = 0 shots.
 
-### M0.5 — Enemies and waves
+### M0.5 — Enemies and waves ✅
 - Enemy types from content (walker, swarmer first). Movement along path, HP, reaching core deals damage.
 - Wave spawner from content; targeting = first-along-path in range.
 - One shared tick advances factory, towers, enemies.

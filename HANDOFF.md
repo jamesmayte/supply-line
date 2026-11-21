@@ -39,11 +39,34 @@ _Update at the end of every session._
     - **Empty**: 0 shots, `starved`. A full magazine cut off fires exactly 20 rounds, then stops.
   - Total 58 green, typecheck clean.
 
+- **M0.5 done** (enemies and waves):
+  - `core/game.ts`: `GameState` (plain JSON: tick, seed + rng, phase, wave clock, core HP, enemies, factory,
+    kills / leaked / damageDealt, last tick's rejected commands). `makeGameCtx(content, mapId)`,
+    `newGame(content, mapId, seed)`, and the single entry point **`step(state, input[], dt, ctx)`**.
+    Tick order: commands → spawn → move enemies (leaks hit the core) → factory → towers fire → settle.
+  - Phases: `build` → `startWave` → `wave` → `build` … → `won`; `lost` when core HP hits 0 (state then frozen).
+    Factory commands work in any phase (spec: build during waves allowed).
+  - Waves spawn from content (`delay` + k·`spacing` per group). Enemies move at content `speed` (tiles/s).
+  - Targeting: live enemy **furthest along the path** within `range` (Euclidean from the tower's tile centre),
+    ties → lower id. Instant hit, retarget every shot. Damage = tower damage × ammo multiplier,
+    × (1 − armour) unless armour-piercing. Splash hits others within `splash` of the target. Air rules from content.
+  - `stepTowers` now takes a per-shot `fire` callback (replaces M0.4's `engaged` set). Status `idle` = loaded,
+    nothing in range.
+  - `core/hash.ts`: FNV-1a over the JSON state. Determinism test: same seed + inputs ⇒ identical hash.
+  - `tests/game.test.ts` (14 tests). Total 72 green, typecheck clean.
+  - Sanity run, scrapyard_1, **one** 2 bullets/s chain → Gunner at (6,8), 30 s warm-up:
+    | wave | kills | leaked | core HP |
+    | --- | --- | --- | --- |
+    | 1 | 5 | 1 | 95 |
+    | 2 | 4 | 6 | 65 |
+    | 3 | 10 | 2 | 61 |
+    | 4 | 11 | 9 | 16 |
+    | 5 | 3 | 4 | 0 (lost) |
+
 ## Next
 
-**M0.5 — Enemies and waves** (see `docs/build-plan.md`). Prompt in `docs/kickoff-prompts.md`, Session 4.
-Replace the `engaged` set with first-along-path targeting in range, apply damage + ammo multipliers, and
-add the single `step(state, input, dt)` entry point (factory → towers → enemies).
+**M0.6 — The interlock test** ⭐ (see `docs/build-plan.md`). Prompt in `docs/kickoff-prompts.md`, Session 5.
+Run A = the one-chain build above; run B = two chains. Assert B kills more / loses less core HP; record numbers.
 
 ## Decisions so far
 
@@ -72,6 +95,17 @@ add the single `step(state, input, dt)` entry point (factory → towers → enem
   Damage and range are in content but unused until enemies exist.
 - Tower input ports = 1 (constant in `factoryBuild.ts`). Could move into the tower schema if towers should differ.
 - Tower `utilisation` isn't set (per-tick shots are too noisy). The harness can compute a rate from `shots`.
+
+## Decisions in M0.5 (easy to change, flag if wrong)
+
+- `step` takes `ctx` (static content lookups) as a 4th argument rather than closing over it.
+- **The seeded RNG isn't used yet**: nothing in the spec so far needs randomness. Seed + rng live in the state
+  and the hash, ready for crits / spawn jitter / card draws. I didn't invent random behaviour to use it.
+- Hits are instant (no projectiles). Damage counts only HP removed, so overkill isn't counted.
+- Enemies spawn at distance 0 and move on the tick they spawn.
+- Leaked enemies are removed once they deal core damage. No partial waves: a wave ends when all have
+  spawned and none are alive.
+- No economy yet: build costs and `startingStock` still aren't enforced.
 
 ## Open questions from M0.2
 
