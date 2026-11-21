@@ -3,11 +3,15 @@
  * an invalid command returns the unchanged state plus a reason (never throws on bad input).
  */
 import { tileAt, tileKey } from "./grid";
-import { buildingOf, outputItem, type FactoryCtx, type FactoryNode, type FactoryState } from "./factory";
-import { canPlaceBuilding, routeLink } from "./placement";
+import { buildingOf, outputItem, towerOf, type FactoryCtx, type FactoryNode, type FactoryState } from "./factory";
+import { canPlaceBuilding, canPlaceTower, routeLink } from "./placement";
+
+/** Towers take ammo through one input port and have no outputs. */
+const TOWER_INPUT_PORTS = 1;
 
 export type FactoryCommand =
   | { type: "place"; buildingId: string; x: number; y: number; recipeId?: string }
+  | { type: "placeTower"; towerId: string; x: number; y: number }
   | { type: "link"; from: number; to: number; tier?: number; itemId?: string }
   | { type: "unlink"; linkId: number }
   | { type: "remove"; nodeId: number };
@@ -25,6 +29,8 @@ export function occupiedTiles(state: FactoryState): Set<string> {
 
 /** Whether node accepts itemId on an input port. */
 export function accepts(ctx: FactoryCtx, node: FactoryNode, itemId: string): boolean {
+  const tower = towerOf(ctx, node);
+  if (tower) return tower.ammo.includes(itemId);
   const b = buildingOf(ctx, node);
   switch (b.kind) {
     case "hub":
@@ -41,6 +47,9 @@ export function accepts(ctx: FactoryCtx, node: FactoryNode, itemId: string): boo
     }
   }
 }
+
+const inputPorts = (ctx: FactoryCtx, node: FactoryNode): number =>
+  node.towerId ? TOWER_INPUT_PORTS : buildingOf(ctx, node).inputPorts;
 
 export function applyFactoryCommand(state: FactoryState, ctx: FactoryCtx, cmd: FactoryCommand): CommandResult {
   const err = (error: string): CommandResult => ({ state, error });
@@ -81,6 +90,30 @@ export function applyFactoryCommand(state: FactoryState, ctx: FactoryCtx, cmd: F
       return { state: next, id };
     }
 
+    case "placeTower": {
+      const t = ctx.towers.get(cmd.towerId);
+      if (!t) return err(`unknown tower '${cmd.towerId}'`);
+      const check = canPlaceTower(ctx.grid, cmd.x, cmd.y, occupiedTiles(state));
+      if (!check.ok) return err(check.reason);
+      const id = next.nextId++;
+      next.nodes.push({
+        id,
+        buildingId: t.id,
+        towerId: t.id,
+        x: cmd.x,
+        y: cmd.y,
+        inputs: {}, // magazine: starts empty, filled only by links
+        output: 0,
+        burning: false,
+        utilisation: 0,
+        status: "idle",
+        produced: 0,
+        cooldown: 0,
+        shots: 0,
+      });
+      return { state: next, id };
+    }
+
     case "link": {
       const from = state.nodes.find((n) => n.id === cmd.from);
       const to = state.nodes.find((n) => n.id === cmd.to);
@@ -88,6 +121,7 @@ export function applyFactoryCommand(state: FactoryState, ctx: FactoryCtx, cmd: F
       if (from.id === to.id) return err("can't link a building to itself");
       const tier = ctx.tiers.get(cmd.tier ?? 1);
       if (!tier) return err(`unknown link tier ${cmd.tier}`);
+      if (from.towerId) return err("towers have no output");
 
       const fromB = buildingOf(ctx, from);
       const itemId = fromB.kind === "hub" ? cmd.itemId : outputItem(ctx, from);
@@ -98,7 +132,7 @@ export function applyFactoryCommand(state: FactoryState, ctx: FactoryCtx, cmd: F
       const outs = state.links.filter((l) => l.from === from.id).length;
       const ins = state.links.filter((l) => l.to === to.id).length;
       if (outs >= fromB.outputPorts) return err(`${fromB.id} has no free output port`);
-      if (ins >= buildingOf(ctx, to).inputPorts) return err(`${to.buildingId} has no free input port`);
+      if (ins >= inputPorts(ctx, to)) return err(`${to.buildingId} has no free input port`);
       if (state.links.some((l) => l.from === from.id && l.to === to.id && l.itemId === itemId)) return err("already linked");
 
       const route = routeLink(ctx.grid, from, to, tier);

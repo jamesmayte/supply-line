@@ -2,7 +2,8 @@
  * Factory graph (spec §4). Buildings are nodes, links are capped edges. Items are rates and buffers,
  * never individual entities: buffers hold fractional amounts and recipes run fractionally each tick.
  *
- * Tick order (deterministic, by id): power → production → transport.
+ * Tick order (deterministic, by id): power → production → transport. Towers are nodes too (link targets
+ * whose input buffer is their magazine); they fire in core/towers.ts after the factory step.
  * All gameplay numbers come from content via FactoryCtx; nothing here is tuned by hand.
  */
 import type { Content } from "../content/schema";
@@ -12,6 +13,7 @@ type Building = Content["buildings"][number];
 type Recipe = Content["recipes"][number];
 type Item = Content["items"][number];
 type LinkTier = Content["linkTiers"][number];
+type Tower = Content["towers"][number];
 
 /** float tolerance for "full", "empty" and "running flat out" */
 export const EPS = 1e-9;
@@ -38,6 +40,12 @@ export interface FactoryNode {
   status: NodeStatus;
   /** cumulative items produced (or extracted) */
   produced: number;
+  /** towers only: which tower this node is (buildingId holds the same id) */
+  towerId?: string;
+  /** towers only: seconds until the next shot may fire */
+  cooldown?: number;
+  /** towers only: cumulative shots fired */
+  shots?: number;
 }
 
 export interface FactoryLink {
@@ -67,6 +75,7 @@ export interface FactoryCtx {
   recipes: ReadonlyMap<string, Recipe>;
   items: ReadonlyMap<string, Item>;
   tiers: ReadonlyMap<number, LinkTier>;
+  towers: ReadonlyMap<string, Tower>;
 }
 
 export function makeFactoryCtx(content: Content, grid: Grid): FactoryCtx {
@@ -77,13 +86,23 @@ export function makeFactoryCtx(content: Content, grid: Grid): FactoryCtx {
     recipes: new Map(content.recipes.map((r) => [r.id, r])),
     items: new Map(content.items.map((i) => [i.id, i])),
     tiers: new Map(content.linkTiers.map((t) => [t.tier, t])),
+    towers: new Map(content.towers.map((t) => [t.id, t])),
   };
 }
 
 const sum = (rec: Record<string, number>): number => Object.values(rec).reduce((a, b) => a + b, 0);
 const clean = (v: number): number => (v < EPS ? 0 : v);
 
+/** The tower a node is, if it is one. */
+export function towerOf(ctx: FactoryCtx, node: FactoryNode): Tower | undefined {
+  if (!node.towerId) return undefined;
+  const t = ctx.towers.get(node.towerId);
+  if (!t) throw new Error(`unknown tower '${node.towerId}'`);
+  return t;
+}
+
 export function buildingOf(ctx: FactoryCtx, node: FactoryNode): Building {
+  if (node.towerId) throw new Error(`node ${node.id} is a tower, not a building`);
   const b = ctx.buildings.get(node.buildingId);
   if (!b) throw new Error(`unknown building '${node.buildingId}'`);
   return b;
@@ -98,17 +117,21 @@ export function outputItem(ctx: FactoryCtx, node: FactoryNode): string | undefin
 
 /** Items available to leave a node along a link carrying itemId. */
 function available(ctx: FactoryCtx, node: FactoryNode, itemId: string): number {
+  if (node.towerId) return 0;
   if (buildingOf(ctx, node).kind === "hub") return node.inputs[itemId] ?? 0;
   return outputItem(ctx, node) === itemId ? node.output : 0;
 }
 
 function take(ctx: FactoryCtx, node: FactoryNode, itemId: string, qty: number): void {
+  if (node.towerId) return; // towers never output
   if (buildingOf(ctx, node).kind === "hub") node.inputs[itemId] = clean((node.inputs[itemId] ?? 0) - qty);
   else node.output = clean(node.output - qty);
 }
 
-/** Free input space for itemId. Hubs share one pool across items. */
+/** Free input space for itemId. Hubs share one pool across items; a tower's magazine is one pool too. */
 function freeSpace(ctx: FactoryCtx, node: FactoryNode, itemId: string): number {
+  const tower = towerOf(ctx, node);
+  if (tower) return Math.max(0, tower.magazine - sum(node.inputs));
   const b = buildingOf(ctx, node);
   if (b.kind === "hub") return Math.max(0, b.bufferSize - sum(node.inputs));
   return Math.max(0, b.bufferSize - (node.inputs[itemId] ?? 0));
@@ -127,6 +150,7 @@ export function isPowered(ctx: FactoryCtx, state: FactoryState, node: FactoryNod
 
 function stepPower(ctx: FactoryCtx, state: FactoryState, dt: number): void {
   for (const n of state.nodes) {
+    if (n.towerId) continue;
     const b = buildingOf(ctx, n);
     if (b.kind !== "generator" || !b.fuel) continue;
     const need = dt / b.fuel.secondsPerItem;
@@ -140,6 +164,7 @@ function stepPower(ctx: FactoryCtx, state: FactoryState, dt: number): void {
 
 function stepProduction(ctx: FactoryCtx, state: FactoryState, dt: number): void {
   for (const n of state.nodes) {
+    if (n.towerId) continue;
     const b = buildingOf(ctx, n);
     if (b.kind === "generator") continue;
     if (b.kind === "hub") {
@@ -210,9 +235,10 @@ function stepTransport(ctx: FactoryCtx, state: FactoryState, dt: number): void {
   };
   // sources: one pool per (node, item)
   scaleGroups((l) => `${l.from}:${l.itemId}`, (l) => available(ctx, node(l.from), l.itemId));
-  // targets: hubs share one pool; other buildings one buffer per item
+  // targets: hubs and tower magazines share one pool; other buildings one buffer per item
+  const pooled = (n: FactoryNode) => !!n.towerId || buildingOf(ctx, n).kind === "hub";
   scaleGroups(
-    (l) => (buildingOf(ctx, node(l.to)).kind === "hub" ? `${l.to}` : `${l.to}:${l.itemId}`),
+    (l) => (pooled(node(l.to)) ? `${l.to}` : `${l.to}:${l.itemId}`),
     (l) => freeSpace(ctx, node(l.to), l.itemId),
   );
 
