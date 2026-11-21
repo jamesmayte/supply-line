@@ -12,7 +12,7 @@ previous one's gate is met. Spec references are to `docs/game-spec.md` sections.
 ### M0.1 — Scaffold ✅ (done by the kit)
 Repo, strict TS, Vitest, Zod content schema, biome 1 sample content, content validation test, CI.
 
-### M0.2 — Grid and path
+### M0.2 — Grid and path ✅
 - `Grid` from a map definition (9 × H tiles: path, ground, ore, rock, bridge).
 - Path as an ordered list of tile centres; enemy position = distance along path.
 - Placement validation: what can go on which tile; links can't cross path except at bridges.

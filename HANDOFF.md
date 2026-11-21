@@ -6,11 +6,18 @@ _Update at the end of every session._
 
 - Phase 0, **M0.1 done** (project kit): strict TS, Vitest, Zod content schema, biome 1 sample content,
   content validation tests, CI (tests + typecheck) and a GitHub Pages workflow for the harness.
-- `/core` is empty apart from a seeded RNG helper and its test.
+- **M0.2 done** (grid and path):
+  - `core/grid.ts`: `buildGrid(map)`, `tileAt`, tile kinds (ground/rock/spawn/path/bridge/core/ore + oreId).
+  - `core/path.ts`: `buildPath(map)` through tile centres; `positionAt(path, d)`, `reachedEnd`.
+    Enemy position = one number (distance along path). Scrapyard 1 path = 24 tiles.
+  - `core/placement.ts`: `canPlaceBuilding` / `canPlaceTower` (extractors on ore only; nothing on
+    path/bridge/core/rock; occupancy set), `routeLink` (L-route, horizontal bend tried first, path crossable
+    only at bridges, rock blocks, length ≤ tier `maxLength` from content).
+  - `tests/grid.test.ts`: 19 tests. Total 28 green, typecheck clean.
 
 ## Next
 
-**M0.2 — Grid and path** (see `docs/build-plan.md`). Prompt in `docs/kickoff-prompts.md`, Session 1.
+**M0.3 — Factory graph** (see `docs/build-plan.md`). Prompt in `docs/kickoff-prompts.md`, Session 2.
 
 ## Decisions so far
 
@@ -18,6 +25,12 @@ _Update at the end of every session._
 - Sim at 10 Hz fixed tick, seeded RNG, pure `/core`.
 - Harness = Vite + Canvas on GitHub Pages so playtests happen on a phone.
 - Engine for Phase 2: Godot 4 (not started until Phase 1 gate passes).
+
+## Open questions from M0.2
+
+- Can a link's route pass over tiles holding other buildings/towers or ore? Currently **yes** (only rock
+  and non-bridge path block). Easy to tighten by passing the occupancy set into `routeLink`.
+- Link length = Manhattan distance between the two buildings' tiles.
 
 ## Open questions (from spec §11)
 
