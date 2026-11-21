@@ -83,12 +83,12 @@ export function routeLink(grid: Grid, a: TileXY, b: TileXY, tier: LinkTier): Lin
   if (a.x === b.x && a.y === b.y) return { ok: false, reason: "can't link a building to itself" };
   const len = linkLength(a, b);
   if (len > tier.maxLength) return { ok: false, reason: `link length ${len} exceeds tier ${tier.tier} max ${tier.maxLength}` };
-  let firstFail = "";
+  const reasons: string[] = [];
   for (const horizontalFirst of [true, false]) {
     const route = lRoute(a, b, horizontalFirst);
     const c = checkRoute(grid, route);
     if (c.ok) return { ok: true, route };
-    firstFail ||= c.reason;
+    if (!reasons.includes(c.reason)) reasons.push(c.reason);
   }
-  return { ok: false, reason: firstFail };
+  return { ok: false, reason: reasons.join("; ") };
 }
