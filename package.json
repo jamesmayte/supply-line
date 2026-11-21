@@ -1,0 +1,26 @@
+{
+  "name": "supply-line",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Portrait mobile tower defence where towers only fire if your factory feeds them.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}
