@@ -3,7 +3,7 @@ import { biome1 } from "../content/biome1";
 import { emptyFactory, makeFactoryCtx, stepFactory, type FactoryState } from "../core/factory";
 import { applyFactoryCommand, type FactoryCommand } from "../core/factoryBuild";
 import { buildGrid } from "../core/grid";
-import { magazineCount, stepTowers } from "../core/towers";
+import { magazineCount, stepTowers, type FireFn } from "../core/towers";
 
 const DT = 0.1; // 10 Hz sim tick
 const ctx = makeFactoryCtx(biome1, buildGrid(biome1.maps[0]!));
@@ -22,8 +22,8 @@ function build(cmds: FactoryCommand[], state: FactoryState = emptyFactory()) {
 }
 
 /** One shared tick: factory (refills magazines), then towers fire. */
-function run(state: FactoryState, seconds: number, engaged?: ReadonlySet<number>): FactoryState {
-  for (let i = 0; i < Math.round(seconds / DT); i++) state = stepTowers(stepFactory(state, ctx, DT), ctx, DT, engaged);
+function run(state: FactoryState, seconds: number, fire?: FireFn): FactoryState {
+  for (let i = 0; i < Math.round(seconds / DT); i++) state = stepTowers(stepFactory(state, ctx, DT), ctx, DT, fire);
   return state;
 }
 
@@ -120,7 +120,7 @@ describe("empty Gunner", () => {
 
   it("a full magazine fires exactly its size, then stops", () => {
     const fed = build([...POWER, ...CHAIN_A, { type: "link", from: asmA, to: gun }], base.state).state;
-    const loaded = run(fed, 30, new Set()); // not engaged: fills, doesn't fire
+    const loaded = run(fed, 30, () => false); // no target: fills, doesn't fire
     expect(magazineCount(node(loaded, gun))).toBeCloseTo(gunner.magazine, 6);
     expect(node(loaded, gun).shots).toBe(0);
     expect(node(loaded, gun).status).toBe("idle");
