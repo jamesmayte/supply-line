@@ -4,7 +4,8 @@
  * Pure and deterministic: no I/O, no Math.random, plain-JSON state, seeded RNG carried in the state.
  *
  * Tick order:
- *   1. player commands (factory commands any time; startWave only in the build break)
+ *   1. player commands (factory commands any time; startWave only in the build break).
+ *      Placing pays the content buildCost: from the stockpile first, then from hubs (lowest id first).
  *   2. spawn due enemies, advance wave clock
  *   3. move enemies along the path; any that reach the core damage it and leave
  *   4. factory (refills magazines)
@@ -23,6 +24,7 @@ type EnemyDef = Content["enemies"][number];
 type Ammo = Content["ammo"][number];
 type Tower = Content["towers"][number];
 type Wave = Content["maps"][number]["waves"][number];
+type Stack = Content["buildings"][number]["buildCost"][number];
 
 export interface Enemy {
   id: number;
@@ -50,6 +52,8 @@ export interface GameState {
   waveIndex: number;
   wave: WaveState | null;
   coreHp: number;
+  /** stockpile for build costs, item → qty (starts as the map's startingStock) */
+  stock: Record<string, number>;
   enemies: Enemy[];
   nextEnemyId: number;
   factory: FactoryState;
@@ -94,6 +98,7 @@ export function newGame(content: Content, mapId: string, seed: number): GameStat
     waveIndex: 0,
     wave: null,
     coreHp: map.coreHp,
+    stock: Object.fromEntries(map.startingStock.map((st) => [st.itemId, st.qty])),
     enemies: [],
     nextEnemyId: 1,
     factory: emptyFactory(),
@@ -135,6 +140,48 @@ export function pickTarget(ctx: GameCtx, enemies: readonly Enemy[], node: Factor
   return best;
 }
 
+/* ---------- economy ---------- */
+
+/** What a command costs to carry out (empty if free). */
+export function costOf(ctx: GameCtx, input: GameInput): readonly Stack[] {
+  if (input.type === "place") return ctx.factory.buildings.get(input.buildingId)?.buildCost ?? [];
+  if (input.type === "placeTower") return ctx.factory.towers.get(input.towerId)?.buildCost ?? [];
+  return [];
+}
+
+const hubsOf = (state: GameState, ctx: GameCtx): FactoryNode[] =>
+  state.factory.nodes.filter((n) => !n.towerId && ctx.factory.buildings.get(n.buildingId)?.kind === "hub");
+
+/** Items available to spend on building: stockpile + everything held in hubs. */
+export function spendable(state: GameState, ctx: GameCtx, itemId: string): number {
+  return (state.stock[itemId] ?? 0) + hubsOf(state, ctx).reduce((a, h) => a + (h.inputs[itemId] ?? 0), 0);
+}
+
+function shortfall(state: GameState, ctx: GameCtx, cost: readonly Stack[]): string | undefined {
+  for (const c of cost) {
+    const have = spendable(state, ctx, c.itemId);
+    if (have < c.qty - 1e-9) return `can't afford: needs ${c.qty} ${c.itemId}, have ${Math.floor(have + 1e-9)}`;
+  }
+  return undefined;
+}
+
+/** Pay a cost: stockpile first, then hubs in id order. Caller has checked it's affordable. */
+function pay(state: GameState, ctx: GameCtx, cost: readonly Stack[]): void {
+  for (const c of cost) {
+    let owed = c.qty;
+    const fromStock = Math.min(owed, state.stock[c.itemId] ?? 0);
+    state.stock[c.itemId] = (state.stock[c.itemId] ?? 0) - fromStock;
+    owed -= fromStock;
+    for (const h of hubsOf(state, ctx)) {
+      if (owed <= 1e-9) break;
+      const take = Math.min(owed, h.inputs[c.itemId] ?? 0);
+      h.inputs[c.itemId] = (h.inputs[c.itemId] ?? 0) - take;
+      if (h.inputs[c.itemId]! < 1e-9) h.inputs[c.itemId] = 0;
+      owed -= take;
+    }
+  }
+}
+
 function applyInput(state: GameState, ctx: GameCtx, input: GameInput): string | undefined {
   if (input.type === "startWave") {
     if (state.phase !== "build") return `can't start a wave during '${state.phase}'`;
@@ -144,8 +191,13 @@ function applyInput(state: GameState, ctx: GameCtx, input: GameInput): string | 
   }
   if (state.phase === "won" || state.phase === "lost") return "run is over";
   const r = applyFactoryCommand(state.factory, ctx.factory, input);
+  if (r.error) return r.error;
+  const cost = costOf(ctx, input);
+  const short = shortfall(state, ctx, cost); // checked against hubs before the new node exists
+  if (short) return short;
   state.factory = r.state;
-  return r.error;
+  pay(state, ctx, cost);
+  return undefined;
 }
 
 function spawn(state: GameState, ctx: GameCtx, dt: number): void {

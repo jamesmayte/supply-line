@@ -4,6 +4,10 @@
  *   Run A: one extractor → smelter → assembler chain (2 bullets/s) → hub → 3 Gunners.
  *   Run B: two chains (4 bullets/s) → the same hub → the same 3 Gunners.
  * Doubling bullet supply must measurably increase kills and reduce core damage.
+ *
+ * Build costs are paid (M0.7). The shared build costs exactly the map's 20 starting ingots, so run B
+ * earns its second chain: it first sends chain A's ingots into the hub, then spends them on chain B.
+ * Both runs get the same build break.
  */
 import { describe, expect, it } from "vitest";
 import { biome1 } from "../content/biome1";
@@ -40,29 +44,40 @@ const COMMON: GameInput[] = [
   ...GUNS.map((g): GameInput => ({ type: "link", from: 6, to: g, itemId: "bullets", tier: 2 })), // 14..16
 ];
 
-/** Run A: one chain, 2 bullets/s. */
-const RUN_A: GameInput[] = COMMON;
+/** A script: commands to apply on a given tick of the build break. */
+type Script = Record<number, GameInput[]>;
 
-/** Run B: plus a second chain into the same hub, 4 bullets/s. */
-const RUN_B: GameInput[] = [
-  ...COMMON,
-  { type: "place", buildingId: "extractor", x: 8, y: 3 }, // 17 coal
-  { type: "place", buildingId: "generator", x: 8, y: 5 }, // 18 powers y 2..8
-  { type: "place", buildingId: "extractor", x: 8, y: 8 }, // 19 iron
-  { type: "place", buildingId: "smelter", x: 5, y: 8 }, // 20
-  { type: "place", buildingId: "assembler", x: 7, y: 6, recipeId: "make_bullets" }, // 21
-  { type: "link", from: 17, to: 18 },
-  { type: "link", from: 19, to: 20 },
-  { type: "link", from: 20, to: 21 },
-  { type: "link", from: 21, to: 6 },
-];
+/** Run A: one chain, 2 bullets/s. */
+const RUN_A: Script = { 0: COMMON };
+
+/** Run B: bank ingots in the hub, then buy a second chain into the same hub (4 bullets/s). */
+const BANK = COMMON.map((c): GameInput => (c.type === "link" && c.from === 4 && c.to === 5 ? { type: "link", from: 4, to: 6 } : c)); // link 12: smelter → hub
+const EXPAND_TICK = 210; // ~9 ingots banked by 21 s
+const RUN_B: Script = {
+  0: BANK,
+  [EXPAND_TICK]: [
+    { type: "unlink", linkId: 12 },
+    { type: "link", from: 4, to: 5 }, // 17: smelter → assembler, as in run A
+    { type: "place", buildingId: "extractor", x: 8, y: 3 }, // 18 coal
+    { type: "place", buildingId: "generator", x: 8, y: 5 }, // 19 powers y 2..8 (3 ingots)
+    { type: "place", buildingId: "extractor", x: 8, y: 8 }, // 20 iron
+    { type: "place", buildingId: "smelter", x: 5, y: 8 }, // 21 (2 ingots)
+    { type: "place", buildingId: "assembler", x: 7, y: 6, recipeId: "make_bullets" }, // 22 (4 ingots)
+    { type: "link", from: 18, to: 19 },
+    { type: "link", from: 20, to: 21 },
+    { type: "link", from: 21, to: 22 },
+    { type: "link", from: 22, to: 6 },
+  ],
+};
 
 interface WaveResult { wave: number; kills: number; leaked: number; coreHp: number }
 
-function play(build: GameInput[]) {
-  let s: GameState = step(newGame(biome1, MAP, SEED), build, DT, ctx);
-  if (s.errors.length) throw new Error(s.errors.join("; "));
-  for (let i = 1; i < WARMUP_S / DT; i++) s = step(s, [], DT, ctx);
+function play(script: Script) {
+  let s: GameState = newGame(biome1, MAP, SEED);
+  for (let i = 0; i < WARMUP_S / DT; i++) {
+    s = step(s, script[i] ?? [], DT, ctx);
+    if (s.errors.length) throw new Error(`tick ${i}: ${s.errors.join("; ")}`);
+  }
   const waves: WaveResult[] = [];
   while (s.phase === "build") {
     const before = s;
@@ -86,6 +101,13 @@ describe("the interlock: factory throughput = damage output", () => {
     const where = (s: GameState) => towers(s).map(({ id, towerId, x, y }) => ({ id, towerId, x, y }));
     expect(where(A.final)).toEqual(where(B.final));
     expect(where(A.final).map((t) => t.id)).toEqual(GUNS);
+  });
+
+  it("both runs pay for everything from the same 20 starting ingots", () => {
+    const start = map.startingStock.find((x) => x.itemId === "iron_ingot")!.qty;
+    expect(start).toBe(20);
+    expect(A.final.stock.iron_ingot).toBeCloseTo(0, 9);
+    expect(B.final.stock.iron_ingot).toBeCloseTo(0, 9);
   });
 
   it("run A is ammo-limited: three Gunners want more than one chain makes", () => {
