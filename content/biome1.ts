@@ -22,7 +22,7 @@ const raw = {
     { id: "press", name: "Press", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 4 }] },
     { id: "coal_mill", name: "Coal mill", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 2 }] },
     { id: "assembler", name: "Assembler", kind: "assembler", inputPorts: 3, bufferSize: 20, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 4 }] },
-    { id: "hub", name: "Hub", kind: "hub", inputPorts: 3, bufferSize: 50, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 2 }] },
+    { id: "hub", name: "Hub", kind: "hub", inputPorts: 3, outputPorts: 3, bufferSize: 50, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 2 }] },
     { id: "generator", name: "Generator", kind: "generator", inputPorts: 1, bufferSize: 10, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 3 }], fuel: { itemId: "coal", secondsPerItem: 4 }, powerRadius: 3 },
     { id: "lab", name: "Lab", kind: "lab", inputPorts: 1, bufferSize: 20, needsPower: true, buildCost: [{ itemId: "plate", qty: 6 }] },
   ],

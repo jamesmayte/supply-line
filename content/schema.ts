@@ -26,6 +26,8 @@ export const BuildingSchema = z.object({
   kind: z.enum(["extractor", "processor", "assembler", "hub", "generator", "lab"]),
   speed: z.number().positive().default(1),
   inputPorts: z.number().int().min(0).max(3),
+  /** outgoing links allowed; hubs split, so they get more than 1 */
+  outputPorts: z.number().int().min(0).max(3).default(1),
   bufferSize: z.number().int().positive(),
   needsPower: z.boolean(),
   buildCost: z.array(StackSchema),
