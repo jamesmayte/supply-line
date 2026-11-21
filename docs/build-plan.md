@@ -70,6 +70,10 @@ pacing and feedback before anything else. Write the verdict in HANDOFF.md.
 
 ## Phase 2 — Godot 4 vertical slice (needs the PC for editor/export setup)
 
+**Before starting Phase 2:** make the repo **private** again (Settings → General → Danger Zone →
+Change visibility). The repo is public during Phases 0–1 only for free GitHub Pages play-testing.
+No art, audio, signing keys or store credentials go in while it's public.
+
 - Decide: port `/core` to GDScript/C# or run it via a JS bridge. Record the decision.
 - Real touch UI (radial menu, bottom sheet, flow overlay), biome 1 (8 maps), 3 towers, cards, tower upgrades.
 - GitHub Actions builds an Android APK artifact on every push to `main`.

@@ -24,6 +24,11 @@ _Update at the end of every session._
 - Auto-routed vs player-drawn links · build during waves? · cards + meta vs handcrafted ·
   share core with Factory Front? · 9 tiles wide enough? · free+unlock vs premium · final name.
 
+- Repo is **public during Phases 0–1** for free GitHub Pages; switch back to **private before Phase 2**
+  (see build-plan). Keep secrets, paid assets and signing keys out while public.
+
 ## One-time setup (James)
 
-- In GitHub repo Settings → Pages, set Source to **GitHub Actions** so the harness deploy works.
+- Repo Settings → General → Danger Zone → Change visibility → Public.
+- Repo Settings → Pages → Source: **GitHub Actions**.
+- Harness URL once deployed: https://jamesmayte.github.io/supply-line/
