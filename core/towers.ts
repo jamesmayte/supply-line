@@ -5,9 +5,20 @@
  * It fires one whole round per shot when its cooldown is up; with no round in the magazine it can't fire.
  * Nothing here boosts a tower without ammo: supply is the only way to reach the stated rate.
  *
- * Until M0.5 adds enemies, "engaged" (has a target) is passed in; M0.5 replaces it with targeting.
+ * Targeting and damage live in core/game.ts, which passes a `fire` callback; this file only decides
+ * when a tower may shoot and spends the round.
  */
+import type { Content } from "../content/schema";
 import { EPS, towerOf, type FactoryCtx, type FactoryNode, type FactoryState } from "./factory";
+
+type Tower = Content["towers"][number];
+
+/**
+ * Called once per shot a tower is ready and loaded to fire. Returns true if it hit something (the round
+ * is spent), false if there was no target (the round is kept and the tower waits).
+ */
+export type FireFn = (node: FactoryNode, tower: Tower, ammoId: string) => boolean;
+const alwaysHit: FireFn = () => true;
 
 const clean = (v: number): number => (v < EPS ? 0 : v);
 
@@ -22,30 +33,33 @@ export function magazineCount(node: FactoryNode): number {
 }
 
 /**
- * Advance every tower by dt seconds. Pure: returns a new state.
- * engaged = ids of towers with a target this tick; omitted means every tower is engaged.
+ * Advance every tower by dt seconds. Pure: returns a new state (fire may mutate the caller's own state).
+ * fire omitted = every shot hits (a tower with a target always in range).
  * Shots can't be banked: an idle or empty tower's cooldown stops at 0.
+ * Status: working (fired or loaded and waiting) · starved (magazine empty) · idle (loaded, nothing to shoot).
  */
-export function stepTowers(state: FactoryState, ctx: FactoryCtx, dt: number, engaged?: ReadonlySet<number>): FactoryState {
+export function stepTowers(state: FactoryState, ctx: FactoryCtx, dt: number, fire: FireFn = alwaysHit): FactoryState {
   const next = structuredClone(state);
   for (const n of next.nodes) {
     const tower = towerOf(ctx, n);
     if (!tower) continue;
-    const wants = engaged ? engaged.has(n.id) : true;
     let cooldown = (n.cooldown ?? 0) - dt;
     let fired = 0;
-    if (wants) {
-      while (cooldown <= EPS) {
-        const ammo = loadedAmmo(ctx, n);
-        if (!ammo) break;
-        n.inputs[ammo] = clean(n.inputs[ammo]! - 1);
-        fired++;
-        cooldown += 1 / tower.fireRate;
+    let noTarget = false;
+    while (cooldown <= EPS) {
+      const ammo = loadedAmmo(ctx, n);
+      if (!ammo) break;
+      if (!fire(n, tower, ammo)) {
+        noTarget = true;
+        break;
       }
+      n.inputs[ammo] = clean(n.inputs[ammo]! - 1);
+      fired++;
+      cooldown += 1 / tower.fireRate;
     }
     n.cooldown = Math.max(0, cooldown);
     n.shots = (n.shots ?? 0) + fired;
-    n.status = !wants ? "idle" : fired > 0 || loadedAmmo(ctx, n) ? "working" : "starved";
+    n.status = fired > 0 ? "working" : !loadedAmmo(ctx, n) ? "starved" : noTarget ? "idle" : "working";
   }
   return next;
 }
