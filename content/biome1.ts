@@ -54,9 +54,10 @@ const raw = {
   ],
 
   enemies: [
-    { id: "walker", name: "Walker", hp: 40, speed: 0.8, coreDamage: 5 },
-    { id: "swarmer", name: "Swarmer", hp: 12, speed: 1.6, coreDamage: 2 },
-    { id: "armoured", name: "Armoured", hp: 120, speed: 0.5, armour: 0.6, coreDamage: 15 },
+    // HP doubled in M0.6 (was 40 / 12 / 120) so that ammo, not tower count, limits a 3-Gunner defence.
+    { id: "walker", name: "Walker", hp: 80, speed: 0.8, coreDamage: 5 },
+    { id: "swarmer", name: "Swarmer", hp: 24, speed: 1.6, coreDamage: 2 },
+    { id: "armoured", name: "Armoured", hp: 240, speed: 0.5, armour: 0.6, coreDamage: 15 },
   ],
 
   research: [

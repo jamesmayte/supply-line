@@ -37,7 +37,7 @@ Repo, strict TS, Vitest, Zod content schema, biome 1 sample content, content val
 - One shared tick advances factory, towers, enemies.
 - Tests: determinism (same seed + inputs twice ⇒ identical state hash).
 
-### M0.6 — The interlock test ⭐
+### M0.6 — The interlock test ⭐ ✅
 - Scripted scenario: map 1, fixed build, 5 waves. Run A with one extractor+smelter chain, run B with two.
 - Assert run B kills measurably more / loses less core HP.
 - **This test is the whole game in miniature.** Record numbers in HANDOFF.md.

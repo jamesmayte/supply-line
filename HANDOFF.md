@@ -54,7 +54,7 @@ _Update at the end of every session._
     nothing in range.
   - `core/hash.ts`: FNV-1a over the JSON state. Determinism test: same seed + inputs ⇒ identical hash.
   - `tests/game.test.ts` (14 tests). Total 72 green, typecheck clean.
-  - Sanity run, scrapyard_1, **one** 2 bullets/s chain → Gunner at (6,8), 30 s warm-up:
+  - Sanity run (at M0.5's enemy HP, since doubled in M0.6), scrapyard_1, **one** 2 bullets/s chain → Gunner at (6,8), 30 s warm-up:
     | wave | kills | leaked | core HP |
     | --- | --- | --- | --- |
     | 1 | 5 | 1 | 95 |
@@ -63,10 +63,46 @@ _Update at the end of every session._
     | 4 | 11 | 9 | 16 |
     | 5 | 3 | 4 | 0 (lost) |
 
+- **M0.6 done** (the interlock test ⭐): `tests/interlock.test.ts`.
+  - Scrapyard 1, seed 1, 30 s build break, then 5 waves with no input. Both runs: one hub feeding
+    **3 Gunners** at (6,8), (4,8), (2,7) over tier-2 links. **Run A** = 1 bullet chain (2/s). **Run B** = 2 chains (4/s).
+  - Asserts: same towers on the same tiles; B fires more, kills > 1.2× A, leaks less, keeps more core HP,
+    gets at least as far; both runs reproduce their hash.
+  - Results (kills / leaked / core HP after each wave):
+    | wave | A: 1 chain | B: 2 chains |
+    | --- | --- | --- |
+    | 1 | 6 / 0 / 100 | 6 / 0 / 100 |
+    | 2 | 5 / 5 / 75 | 10 / 0 / 100 |
+    | 3 | 11 / 1 / 73 | 12 / 0 / 100 |
+    | 4 | 10 / 10 / 23 | 13 / 7 / 65 |
+    | 5 | 4 / 5 / **0, lost** | 8 / 2 / **35, won** |
+    | total | **36 kills, 21 leaked** | **49 kills, 9 leaked** |
+  - Total 78 green, typecheck clean.
+
+### What M0.6 found (read this before the gate)
+
+The first attempt used **one** Gunner, as M0.5's sanity run did, and **A and B were identical** (same 215 shots).
+- A Gunner only has a target ~40% of the time. Between engagements one chain refills its magazine, so in a fight it fires at its full stated rate. The tower is the limit, not the factory.
+- With M0.5's HP, **adding a tower beat doubling the factory**:
+
+| Gunners | 1 chain | 2 chains |
+| --- | --- | --- |
+| 1 | lost w5, 33 kills | identical |
+| 2 | won, 56 kills, 70 HP | won, 57 kills, 85 HP |
+| 3 | won, 56 kills, 70 HP | won, 58 kills, 100 HP |
+
+- **Magazine size barely mattered** (5 vs 20 changed little). The fix that made the factory matter: enough
+  towers that demand (3 × 3 = 9 shots/s) exceeds supply, plus enemies tough enough to need sustained fire
+  → **enemy HP doubled** in `content/biome1.ts` (James's call, M0.6).
+- **Risk for the real game:** towers are free (build costs aren't enforced), so a player can stack towers
+  instead of building factory. The pillar holds only while tower count is limited. The economy (towers cost
+  ingots: "cheap to place, expensive to keep firing") is what should make that trade real. Worth deciding
+  before/during Phase 1.
+
 ## Next
 
-**M0.6 — The interlock test** ⭐ (see `docs/build-plan.md`). Prompt in `docs/kickoff-prompts.md`, Session 5.
-Run A = the one-chain build above; run B = two chains. Assert B kills more / loses less core HP; record numbers.
+**Phase 0 gate (James):** M0.6 passes. Do the numbers above feel sane? Write the verdict here.
+Then **M1.1 — Render** (Vite + Canvas harness, see `docs/build-plan.md`).
 
 ## Decisions so far
 
@@ -106,6 +142,16 @@ Run A = the one-chain build above; run B = two chains. Assert B kills more / los
 - Leaked enemies are removed once they deal core damage. No partial waves: a wave ends when all have
   spawned and none are alive.
 - No economy yet: build costs and `startingStock` still aren't enforced.
+
+## Decisions in M0.6
+
+- Biome 1 enemy HP doubled (walker 80, swarmer 24, armoured 240). The M0.5 sanity table predates this.
+- The interlock scenario uses 3 Gunners so that ammo, not tower count, is the binding constraint.
+
+## Open questions from M0.6
+
+- Enforce build costs / an economy so towers compete with the factory for ingots? (Proposal, not in the plan yet.)
+- Is 40% tower uptime + a 20-round buffer too forgiving? Denser waves are the other lever.
 
 ## Open questions from M0.2
 
