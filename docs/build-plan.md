@@ -18,7 +18,7 @@ Repo, strict TS, Vitest, Zod content schema, biome 1 sample content, content val
 - Placement validation: what can go on which tile; links can't cross path except at bridges.
 - Tests: valid/invalid placements; path length; link crossing rules.
 
-### M0.3 — Factory graph
+### M0.3 — Factory graph ✅
 - Buildings (nodes) with input/output buffers; links (edges) with tier throughput caps.
 - `stepFactory(state, dt)`: extract → process recipes → move items along links, respecting caps,
   buffers and power radius (unpowered = 0%).
