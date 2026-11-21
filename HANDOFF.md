@@ -99,10 +99,25 @@ The first attempt used **one** Gunner, as M0.5's sanity run did, and **A and B w
   ingots: "cheap to place, expensive to keep firing") is what should make that trade real. Worth deciding
   before/during Phase 1.
 
+- **M0.7 done** (build costs, added to the plan after M0.6):
+  - `GameState.stock` starts as the map's `startingStock` (scrapyard_1: 20 iron ingots).
+  - `place` / `placeTower` pay the content `buildCost`: **stockpile first, then hubs** (lowest id first).
+    Can't afford → rejected with a reason, nothing changes. Placement errors are checked first and never charge.
+    Removing refunds nothing. Helpers: `costOf`, `spendable` (stock + hub contents).
+  - Interlock rewritten: the shared build costs exactly the 20 starting ingots. Run B sends chain A's ingots
+    into the hub (smelter → hub), and at 21 s re-links smelter → assembler and buys chain B (9 ingots) from
+    the hub. Same 30 s build break for both.
+    - At wave 1, B has 14 buildings but only 11.7 rounds per Gunner (A: 19.8). Both score 6 kills in wave 1.
+      After that B's 4/s takes over, and the totals match M0.6: **A 36 kills / lost, B 49 kills / won with 35 HP**.
+  - `tests/game.test.ts` +6 economy tests. Total 85 green, typecheck clean.
+
+## Phase 0 gate: ✅ passed
+
+James (after M0.7): go with the suggestion. Phase 0 passes, and towers now cost ingots so they compete with ammo.
+
 ## Next
 
-**Phase 0 gate (James):** M0.6 passes. Do the numbers above feel sane? Write the verdict here.
-Then **M1.1 — Render** (Vite + Canvas harness, see `docs/build-plan.md`).
+**M1.1 — Render** (Vite + Canvas harness, see `docs/build-plan.md`). Prompt in `docs/kickoff-prompts.md`.
 
 ## Decisions so far
 
@@ -148,10 +163,18 @@ Then **M1.1 — Render** (Vite + Canvas harness, see `docs/build-plan.md`).
 - Biome 1 enemy HP doubled (walker 80, swarmer 24, armoured 240). The M0.5 sanity table predates this.
 - The interlock scenario uses 3 Gunners so that ammo, not tower count, is the binding constraint.
 
+## Decisions in M0.7 (easy to change, flag if wrong)
+
+- Build costs can be paid from **any** hub, not only one linked to the build site. Simplest reading of the spec's
+  "drawn from a connected Hub"; tighten once the harness shows whether it matters.
+- No income except what the factory delivers into hubs. Nothing refills the stockpile itself.
+- No refunds on remove; spec wrecks (rebuild at half cost) are not modelled.
+
 ## Open questions from M0.6
 
-- Enforce build costs / an economy so towers compete with the factory for ingots? (Proposal, not in the plan yet.)
+- ~~Enforce build costs?~~ Done in M0.7.
 - Is 40% tower uptime + a 20-round buffer too forgiving? Denser waves are the other lever.
+- With costs in, re-check in the harness whether "one more Gunner" still beats "one more chain" for players.
 
 ## Open questions from M0.2
 

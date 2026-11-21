@@ -42,7 +42,13 @@ Repo, strict TS, Vitest, Zod content schema, biome 1 sample content, content val
 - Assert run B kills measurably more / loses less core HP.
 - **This test is the whole game in miniature.** Record numbers in HANDOFF.md.
 
-**Phase 0 gate:** M0.6 passes and the numbers feel sane.
+### M0.7 — Build costs ✅ (added after M0.6, James approved)
+- Stockpile from the map's `startingStock`; placing pays content `buildCost`, from stock first, then hubs.
+- Unaffordable builds are rejected. Removing refunds nothing (wrecks at half cost come later).
+- Interlock run B must earn its second chain by banking ingots in a hub.
+- Why: M0.6 showed free towers beat factory; towers must compete with ammo for ingots.
+
+**Phase 0 gate:** M0.6 passes and the numbers feel sane. ✅ Passed (James, after M0.7).
 
 ---
 
