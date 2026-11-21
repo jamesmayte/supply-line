@@ -115,9 +115,39 @@ The first attempt used **one** Gunner, as M0.5's sanity run did, and **A and B w
 
 James (after M0.7): go with the suggestion. Phase 0 passes, and towers now cost ingots so they compete with ammo.
 
+## Phase 1
+
+- **M1.1 done** (render):
+  - `harness/main.ts`: fixed 10 Hz sim loop (accumulator, max 20 steps/frame), 1×/2× speed, pause.
+    **Auto-pauses when the tab is hidden** (invariant 5) and doesn't catch up on return.
+  - `harness/render.ts`: Canvas 2D, reads state only. The map fits between the top and bottom bars
+    (tile size limited by width and height). Draws:
+    - Tiles, with speckled ore and a dashed path line.
+    - Buildings with a letter (E extractor, S smelter, A assembler, H hub, **P generator**), a status-coloured
+      border (green working, red starved, amber backlogged, grey unpowered) and a utilisation bar
+      (hubs: fill level).
+    - Towers with a faint range circle and a magazine ring that **flashes red when empty**.
+    - Links along their L-routes, with cosmetic dots coloured by item, moving at the link's flow rate.
+    - Enemies interpolated between ticks, with HP bars (armoured get an outline).
+  - HTML top bar: wave n/5, core HP, ingots, kills, next/current wave makeup.
+    Bottom bar: **1 chain / 2 chains** demo switch, Start wave, Pause, 1×/2×. Won / Core destroyed banner.
+  - Until touch input (M1.2) the harness plays the interlock builds. They now live in
+    `content/scenarios.ts`, shared with `tests/interlock.test.ts`, so the demo is exactly what the test asserts.
+  - Checked in headless Chromium at iPhone 13 size: no console errors, the whole map fits, the run B
+    expansion appears at ~21 s, and starved Gunners flash red.
+  - Debug: `sl.state` in the browser console is the current game state.
+
+### What to try on the phone (once merged to main and Pages has deployed)
+
+https://jamesmayte.github.io/supply-line/
+1. It opens on **2 chains**. Watch for ~20 s: ingots flow into the hub (H), then the second chain appears.
+2. Tap **2×**, then **Start wave**. Start each next wave when the button lights up again.
+3. Tap **1 chain** to reset with the single-chain build and compare: Gunners run dry (red rings) and walkers leak.
+
 ## Next
 
-**M1.1 — Render** (Vite + Canvas harness, see `docs/build-plan.md`). Prompt in `docs/kickoff-prompts.md`.
+**M1.2 — Touch input** (see `docs/build-plan.md`): tap tile → build menu, drag building → building = link,
+long-press → delete. The demo switch can then become "start empty / load demo".
 
 ## Decisions so far
 
@@ -162,6 +192,13 @@ James (after M0.7): go with the suggestion. Phase 0 passes, and towers now cost 
 
 - Biome 1 enemy HP doubled (walker 80, swarmer 24, armoured 240). The M0.5 sanity table predates this.
 - The interlock scenario uses 3 Gunners so that ammo, not tower count, is the binding constraint.
+
+## Decisions in M1.1
+
+- Generator letter is **P** (power) so it doesn't clash with the Gunner's G.
+- HUD bars are HTML, the map is canvas. The renderer recomputes link routes from endpoints (cached),
+  since the sim stores only link length.
+- Pages bundle is ~86 kB (zod comes along with content validation). Fine for now.
 
 ## Decisions in M0.7 (easy to change, flag if wrong)
 

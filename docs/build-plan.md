@@ -54,7 +54,7 @@ Repo, strict TS, Vitest, Zod content schema, biome 1 sample content, content val
 
 ## Phase 1 — Web harness on GitHub Pages (throwaway, playable on a phone)
 
-### M1.1 — Render
+### M1.1 — Render ✅
 - Vite + Canvas 2D, portrait, scales to phone width. Draw grid, path, buildings, enemies, dots on links.
 - Renderer reads sim state only. Fixed 10 Hz sim, interpolated render.
 
