@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { biome1 } from "../content/biome1";
-import { makeGameCtx, newGame, pickTarget, shotDamage, spendable, step, type GameInput, type GameState } from "../core/game";
+import { applyCommands, makeGameCtx, newGame, pickTarget, shotDamage, spendable, step, type GameInput, type GameState } from "../core/game";
 import { hashState } from "../core/hash";
 import { positionAt } from "../core/path";
 
@@ -216,5 +216,23 @@ describe("build costs (M0.7)", () => {
     const removed = step(placed, [{ type: "remove", nodeId: placed.factory.nodes[0]!.id }], DT, ctx);
     expect(removed.factory.nodes).toEqual([]);
     expect(removed.stock.iron_ingot).toBe(start - ingots("smelter"));
+  });
+});
+
+describe("applyCommands (build while paused)", () => {
+  it("applies commands without advancing time", () => {
+    const s = run(newGame(biome1, MAP, 1), 1, { 0: [{ type: "startWave" }] });
+    const after = applyCommands(s, [{ type: "place", buildingId: "hub", x: 7, y: 5 }], ctx);
+    expect(after.tick).toBe(s.tick);
+    expect(after.enemies).toEqual(s.enemies);
+    expect(after.factory.nodes).toHaveLength(1);
+    expect(after.errors).toEqual([]);
+    expect(applyCommands(s, [{ type: "startWave" }], ctx).errors[0]).toMatch(/during 'wave'/);
+  });
+
+  it("then stepping with no input equals stepping with the input", () => {
+    const s = run(newGame(biome1, MAP, 1), 2);
+    const cmd: GameInput[] = [{ type: "place", buildingId: "hub", x: 7, y: 5 }];
+    expect(hashState(step(applyCommands(s, cmd, ctx), [], DT, ctx))).toBe(hashState(step(s, cmd, DT, ctx)));
   });
 });
