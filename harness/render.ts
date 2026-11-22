@@ -28,9 +28,19 @@ const ENEMY_STYLE: Record<string, { colour: string; r: number }> = {
   armoured: { colour: "#8a8f99", r: 0.3 },
 };
 
+/** Transient UI drawn over the map: a selected tile and/or a link being dragged. */
+export interface Overlay {
+  tile?: TileXY;
+  drag?: { route: TileXY[]; ok: boolean; end: Point };
+}
+
 export interface Renderer {
-  draw(prev: GameState, cur: GameState, alpha: number, time: number): void;
+  draw(prev: GameState, cur: GameState, alpha: number, time: number, overlay?: Overlay): void;
   resize(): void;
+  /** Tile under a client-space point, or undefined if off the map. */
+  tileAt(clientX: number, clientY: number): TileXY | undefined;
+  /** Map-space point (tile units) under a client-space point. */
+  pointAt(clientX: number, clientY: number): Point;
 }
 
 export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: GameMap): Renderer {
@@ -220,14 +230,51 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
     g.closePath();
   }
 
+  function drawOverlay(o: Overlay) {
+    if (o.tile) {
+      g.strokeStyle = "#f2c14e";
+      g.lineWidth = 2;
+      g.strokeRect(o.tile.x * tile + 2, o.tile.y * tile + 2, tile - 4, tile - 4);
+    }
+    if (o.drag) {
+      const colour = o.drag.ok ? "#5fbf6a" : "#e0574a";
+      g.strokeStyle = colour;
+      g.lineWidth = tile * 0.12;
+      g.lineCap = "round";
+      g.beginPath();
+      o.drag.route.forEach((p, i) => {
+        const c = tileCentre(p.x, p.y);
+        i ? g.lineTo(c.x * tile, c.y * tile) : g.moveTo(c.x * tile, c.y * tile);
+      });
+      g.stroke();
+      g.lineCap = "butt";
+      g.fillStyle = colour;
+      g.beginPath();
+      g.arc(o.drag.end.x * tile, o.drag.end.y * tile, tile * 0.18, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+
+  function pointAt(clientX: number, clientY: number): Point {
+    const r = canvas.getBoundingClientRect();
+    return { x: (clientX - r.left) / tile, y: (clientY - r.top) / tile };
+  }
+
   return {
     resize,
-    draw(prev, cur, alpha, time) {
+    pointAt,
+    tileAt(clientX, clientY) {
+      const p = pointAt(clientX, clientY);
+      const x = Math.floor(p.x), y = Math.floor(p.y);
+      return x >= 0 && y >= 0 && x < map.width && y < map.rows.length ? { x, y } : undefined;
+    },
+    draw(prev, cur, alpha, time, overlay) {
       g.clearRect(0, 0, canvas.width, canvas.height);
       drawMap();
       drawLinks(cur, time);
       for (const n of cur.factory.nodes) (n.towerId ? drawTower(n, time) : drawBuilding(n));
       drawEnemies(prev, cur, alpha);
+      if (overlay) drawOverlay(overlay);
     },
   };
 }
