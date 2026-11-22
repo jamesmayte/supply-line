@@ -58,13 +58,22 @@ Repo, strict TS, Vitest, Zod content schema, biome 1 sample content, content val
 - Vite + Canvas 2D, portrait, scales to phone width. Draw grid, path, buildings, enemies, dots on links.
 - Renderer reads sim state only. Fixed 10 Hz sim, interpolated render.
 
-### M1.2 — Touch input
+### M1.2 — Touch input ✅
 - Tap tile → simple build menu. Drag from building → building = link (auto L-route).
 - Long-press → delete. Pause, 1×/2× buttons in the bottom bar.
 
 ### M1.3 — Run loop
 - Build break → wave → card pick (3 placeholder cards) → repeat to wave 15 → result screen.
 - Inspect sheet with rates and utilisation; empty-tower red flash.
+
+**Proposals for M1.3 (James, after M1.1; not built yet).** Target feel: like classic wave-based TD
+(e.g. Bloons TD 5): the first waves are very easy, a strong player wants to hurry through them for income,
+later waves get hard, and coming back with meta upgrades makes them passable.
+- **Early-start bonus:** starting the next wave before the build break would naturally end
+  (or while the previous wave is still on screen) pays a small ingot bonus. Rewards a strong factory with speed.
+- **Difficulty curve for 15 waves:** waves 1–4 deliberately easy (one fed Gunner holds them), ramp from ~5,
+  mini-bosses at 5 and 10, boss at 15 (spec §2). Tune in content only.
+- Meta tech tree (spec §7.3) is what makes a failed map passable later; it stays in Phase 3.
 
 ### M1.4 — Research (minimal)
 - Lab building, red science pack recipe, 4–6 research nodes from content.
