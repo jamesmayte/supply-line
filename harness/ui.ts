@@ -106,3 +106,83 @@ export function nodeName(ctx: GameCtx, node: FactoryNode): string {
   const r = node.recipeId ? ctx.factory.recipes.get(node.recipeId) : undefined;
   return b.kind === "assembler" && r ? `${b.name}: ${itemName(ctx, r.outputs[0]!.itemId).toLowerCase()}` : b.name;
 }
+
+/* ---------- inspect sheet (M1.3) ---------- */
+
+export type Tone = "good" | "warn" | "bad";
+export interface InspectLine { label: string; value: string; tone?: Tone }
+export interface Inspection { title: string; lines: InspectLine[]; problem?: string }
+
+const STATUS_TONE: Record<string, Tone> = { working: "good", backlogged: "warn", starved: "bad", unpowered: "bad", idle: "warn" };
+const fmt = (v: number) => (Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1));
+
+/**
+ * The first thing upstream that's holding a node back, in plain words, or undefined if nothing is.
+ * Walks links backwards (nearest first). Unpowered beats starved; for starved nodes the furthest
+ * upstream one is the cause. A tower with a healthy chain that still runs dry needs more supply.
+ */
+export function upstreamProblem(ctx: GameCtx, state: GameState, node: FactoryNode): string | undefined {
+  const byId = new Map(state.factory.nodes.map((n) => [n.id, n]));
+  const inLinks = (id: number) => state.factory.links.filter((l) => l.to === id);
+  if (!inLinks(node.id).length) {
+    if (node.towerId) return "No ammo link: drag from an assembler or hub to this tower";
+    const b = buildingOf(ctx.factory, node);
+    return b.inputPorts > 0 && b.kind !== "hub" ? "Nothing feeds it: drag a link into it" : undefined;
+  }
+  const seen = new Set([node.id]);
+  const upstream: FactoryNode[] = [];
+  let frontier = [node.id];
+  while (frontier.length) {
+    const next: number[] = [];
+    for (const id of frontier)
+      for (const l of inLinks(id))
+        if (!seen.has(l.from)) {
+          seen.add(l.from);
+          upstream.push(byId.get(l.from)!);
+          next.push(l.from);
+        }
+    frontier = next;
+  }
+  const unpowered = upstream.filter((n) => n.status === "unpowered").reverse(); // furthest upstream first
+  if (unpowered.length) {
+    const names = unpowered.map((n) => nodeName(ctx, n));
+    const who = names.length === 1 ? `${names[0]} is` : `${names.slice(0, -1).join(", ")} and ${names.at(-1)} are`;
+    return `${who} unpowered: build a generator within range and feed it coal`;
+  }
+  const starved = upstream.filter((n) => n.status === "starved").pop();
+  if (starved) {
+    const fed = inLinks(starved.id).length;
+    return fed ? `${nodeName(ctx, starved)} is starved: it needs more input` : `${nodeName(ctx, starved)} has no input link`;
+  }
+  if (node.towerId && node.status === "starved") return "The chain runs flat out but can't keep up: add another chain";
+  return undefined;
+}
+
+/** What the inspect sheet shows for a node. `firingRate` (shots/s) is measured by the harness. */
+export function inspect(ctx: GameCtx, state: GameState, node: FactoryNode, firingRate?: number): Inspection {
+  const lines: InspectLine[] = [{ label: "Status", value: node.status, tone: STATUS_TONE[node.status] }];
+  const flowIn = state.factory.links.filter((l) => l.to === node.id);
+  const flowOut = state.factory.links.filter((l) => l.from === node.id);
+  const sum = (ls: typeof flowIn) => ls.reduce((a, l) => a + l.flow, 0);
+  const tower = towerOf(ctx.factory, node);
+  if (tower) {
+    const mag = Object.values(node.inputs).reduce((a, v) => a + v, 0);
+    lines.push({ label: "Magazine", value: `${Math.floor(mag + 1e-9)} / ${tower.magazine}`, tone: mag < 1 ? "bad" : mag < tower.magazine / 4 ? "warn" : "good" });
+    lines.push({ label: "Stated fire rate", value: `${fmt(tower.fireRate)}/s` });
+    if (firingRate !== undefined) lines.push({ label: "Firing (last 5 s)", value: `${fmt(firingRate)}/s` });
+    lines.push({ label: "Ammo arriving", value: flowIn.length ? `${fmt(sum(flowIn))}/s${mag >= tower.magazine - 1e-6 ? " (full)" : ""}` : "none" });
+    lines.push({ label: "Shots fired", value: String(node.shots ?? 0) });
+  } else {
+    const b = buildingOf(ctx.factory, node);
+    if (b.kind !== "hub" && b.kind !== "generator") lines.push({ label: "Utilisation", value: `${Math.round(node.utilisation * 100)}%`, tone: STATUS_TONE[node.status] });
+    for (const [item, qty] of Object.entries(node.inputs))
+      if (qty > 1e-6 || b.kind !== "hub") lines.push({ label: `Holding ${itemName(ctx, item).toLowerCase()}`, value: `${fmt(qty)}${b.kind === "hub" ? "" : ` / ${b.bufferSize}`}` });
+    const out = outputItem(ctx.factory, node);
+    if (out) lines.push({ label: `Output ${itemName(ctx, out).toLowerCase()}`, value: `${fmt(node.output)} / ${b.bufferSize}` });
+    if (flowIn.length) lines.push({ label: "In", value: `${fmt(sum(flowIn))}/s` });
+    if (flowOut.length) lines.push({ label: "Out", value: `${fmt(sum(flowOut))}/s` });
+    if (b.kind === "generator") lines.push({ label: "Powering", value: node.burning ? `yes, radius ${b.powerRadius}` : "no: needs coal" , tone: node.burning ? "good" : "bad" });
+  }
+  const problem = node.status === "working" && !tower ? undefined : upstreamProblem(ctx, state, node);
+  return { title: nodeName(ctx, node), lines, problem };
+}
