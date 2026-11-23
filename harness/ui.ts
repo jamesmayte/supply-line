@@ -18,7 +18,8 @@ export interface BuildOption {
 const itemName = (ctx: GameCtx, id: string) => ctx.factory.items.get(id)?.name ?? id;
 
 export const costLabel = (ctx: GameCtx, cost: readonly Stack[]): string =>
-  cost.length ? cost.map((c) => `${c.qty} ${itemName(ctx, c.itemId).toLowerCase()}`).join(", ") : "free";
+  cost.length ? cost.map((c) => `${c.qty} ${plural1(itemName(ctx, c.itemId).toLowerCase(), c.qty)}`).join(", ") : "free";
+const plural1 = (name: string, n: number) => (n === 1 || name.endsWith("s") ? name : `${name}s`);
 
 const canAfford = (ctx: GameCtx, state: GameState, cost: readonly Stack[]) =>
   cost.every((c) => spendable(state, ctx, c.itemId) >= c.qty - 1e-9);
@@ -164,6 +165,15 @@ export function inspect(ctx: GameCtx, state: GameState, node: FactoryNode, firin
   const lines: InspectLine[] = [{ label: "Status", value: node.status, tone: STATUS_TONE[node.status] }];
   const flowIn = state.factory.links.filter((l) => l.to === node.id);
   const flowOut = state.factory.links.filter((l) => l.from === node.id);
+  {
+    const t = towerOf(ctx.factory, node);
+    const b = t ? undefined : buildingOf(ctx.factory, node);
+    const ins = t ? 1 : (b?.inputPorts ?? 0);
+    const outs = t || b?.kind === "generator" ? 0 : (b?.outputPorts ?? 0);
+    const slots = [ins ? `in ${flowIn.length}/${ins}` : "", outs ? `out ${flowOut.length}/${outs}` : ""].filter(Boolean).join(" · ");
+    if (slots) lines.push({ label: "Link slots used", value: slots, tone: (ins && flowIn.length >= ins) || (outs && flowOut.length >= outs) ? "warn" : undefined });
+    if (b && b.upgrades.length) lines.push({ label: "Tier", value: `${node.level ?? 1} / ${b.upgrades.length + 1}` });
+  }
   const sum = (ls: typeof flowIn) => ls.reduce((a, l) => a + l.flow, 0);
   const tower = towerOf(ctx.factory, node);
   if (tower) {
@@ -234,15 +244,21 @@ export function waveReport(ctx: GameCtx, stats: WaveStats, b: Bottleneck): WaveR
   else if (b.limiting.length) {
     const top = b.limiting[0]!;
     const name = plural(ctx.factory.buildings.get(top.buildingId)?.name ?? top.buildingId);
-    advice = `Bottleneck: ${name}. Speeding them up 25% would raise ammo by ${Math.round(top.gainPct)}%.`;
+    advice = `Bottleneck: ${name}. Upgrade one (tap it), or speeding them up 25% would raise ammo by ${Math.round(top.gainPct)}%.`;
   } else if (b.cappedLinks.length) advice = "A link is carrying its maximum: add a second link or route through a hub.";
   else advice = "Every stage of your chain is at its limit: build another chain for more ammo.";
   return { lines, advice };
 }
 
 /** One line under each card: what it would do for this factory. */
-export function cardNote(a: CardAdvice): string {
+export function cardNote(a: CardAdvice, ctx?: GameCtx, state?: GameState): string {
   if (a.kind === "grant") return "Build now: another chain, or more Gunners";
   const g = Math.round(a.gainPct);
+  if (a.kind === "upgrade") {
+    if (g < 1 || a.nodeId === undefined) return "Keep it for later: no single upgrade helps your current setup";
+    const node = state?.factory.nodes.find((n) => n.id === a.nodeId);
+    const name = node && ctx ? nodeName(ctx, node) : "a building";
+    return `Best use: upgrade ${name} → +${g}% ammo (${fmt(a.baseline)} → ${fmt(a.projected)}/s)`;
+  }
   return g >= 1 ? `+${g}% ammo on your current setup (${fmt(a.baseline)} → ${fmt(a.projected)}/s)` : "No gain on your current setup: another stage limits it";
 }

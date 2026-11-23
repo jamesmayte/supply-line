@@ -4,7 +4,8 @@ import type { GameMap } from "../content/schema";
 import { towerOf, type FactoryNode } from "../core/factory";
 import type { Enemy, GameCtx, GameState } from "../core/game";
 import { positionAt, tileCentre, type Point } from "../core/path";
-import { routeLink, type TileXY } from "../core/placement";
+import type { TileXY } from "../core/placement";
+import { assignLanes, chooseRoutes } from "./links";
 import { magazineCount } from "../core/towers";
 
 const TILE_COLOURS: Record<string, string> = {
@@ -52,6 +53,9 @@ export const STATUS_BADGE: Record<string, { symbol: string; colour: string; labe
   idle: { symbol: "·", colour: "#6f737b", label: "Idle: nothing to do yet" },
 };
 
+/** Building border by upgrade tier: plain, bronze, silver. */
+const TIER_BORDER: Record<number, string> = { 1: "#4a505b", 2: "#b5875a", 3: "#cdd6e0" };
+
 export const ENEMY_STYLE_OF = (id: string) => ENEMY_STYLE[id] ?? { colour: "#ff6ad5", r: 0.22 };
 
 export interface Renderer {
@@ -86,20 +90,8 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
 
   const px = (p: Point) => ({ x: p.x * tile, y: p.y * tile });
 
-  // Link routes are deterministic from the two endpoints; cache by link id + endpoints.
-  const routeCache = new Map<string, Point[]>();
-  function routeOf(from: FactoryNode, to: FactoryNode, tier: number): Point[] {
-    const key = `${from.x},${from.y}>${to.x},${to.y}`;
-    let pts = routeCache.get(key);
-    if (!pts) {
-      const t = ctx.factory.tiers.get(tier)!;
-      const r = routeLink(grid, from, to, t);
-      const tiles: TileXY[] = r.ok ? r.route : [from, to];
-      pts = tiles.map((p) => tileCentre(p.x, p.y));
-      routeCache.set(key, pts);
-    }
-    return pts;
-  }
+  /** Link lane spacing in tiles (links sharing a stretch draw side by side). */
+  const LANE = 0.16;
 
   function drawMap() {
     for (let y = 0; y < map.rows.length; y++)
@@ -127,14 +119,18 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
   }
 
   function drawLinks(state: GameState, time: number) {
-    const byId = new Map(state.factory.nodes.map((n) => [n.id, n]));
+    const routes = chooseRoutes(grid, state.factory.nodes, state.factory.links);
+    const lanes = assignLanes(routes);
+    const bonus = state.factory.linkBonus ?? 0;
     for (const l of state.factory.links) {
-      const from = byId.get(l.from);
-      const to = byId.get(l.to);
-      if (!from || !to) continue;
-      const pts = routeOf(from, to, l.tier);
-      g.strokeStyle = l.tier >= 2 ? "rgba(200, 210, 230, 0.55)" : "rgba(200, 210, 230, 0.3)";
-      g.lineWidth = tile * (l.tier >= 2 ? 0.12 : 0.08);
+      const tiles = routes.get(l.id);
+      if (!tiles) continue;
+      // shifting every point by (o, o) moves each axis-aligned segment sideways by o: a parallel lane
+      const o = (lanes.get(l.id) ?? 0) * LANE;
+      const pts = tiles.map((p) => ({ x: p.x + 0.5 + o, y: p.y + 0.5 + o }));
+      const tier = Math.min(3, l.tier + bonus);
+      g.strokeStyle = tier >= 3 ? "rgba(220, 228, 240, 0.7)" : tier >= 2 ? "rgba(200, 210, 230, 0.5)" : "rgba(200, 210, 230, 0.3)";
+      g.lineWidth = tile * (tier >= 3 ? 0.13 : tier >= 2 ? 0.1 : 0.07);
       g.beginPath();
       pts.forEach((p, i) => (i ? g.lineTo(p.x * tile, p.y * tile) : g.moveTo(p.x * tile, p.y * tile)));
       g.stroke();
@@ -157,12 +153,15 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
   function drawBuilding(n: FactoryNode) {
     const b = ctx.factory.buildings.get(n.buildingId)!;
     const x = n.x * tile, y = n.y * tile, pad = tile * 0.1, s = tile - pad * 2;
-    g.fillStyle = "#2f343d";
+    const lvl = n.level ?? 1;
+    g.fillStyle = lvl >= 3 ? "#353b45" : "#2f343d";
     roundRect(x + pad, y + pad, s, s, tile * 0.15);
     g.fill();
-    g.strokeStyle = "#4a505b";
-    g.lineWidth = tile * 0.04;
+    g.strokeStyle = TIER_BORDER[lvl] ?? TIER_BORDER[1]!;
+    g.lineWidth = tile * (lvl > 1 ? 0.07 : 0.04);
     g.stroke();
+    if (lvl > 1) tierPips(x + pad + tile * 0.1, y + tile * 0.78, lvl);
+    ports(n, x, y);
     g.fillStyle = "#e8e6e1";
     g.font = `600 ${tile * 0.4}px system-ui, sans-serif`;
     g.textAlign = "center";
@@ -176,6 +175,49 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
       g.fillStyle = "#9fb3c8";
       g.fillRect(x + pad + tile * 0.08, y + tile * 0.76, (s - tile * 0.16) * Math.max(0, Math.min(1, frac)), tile * 0.07);
     } else badge(x + tile * 0.8, y + tile * 0.2, n.status);
+  }
+
+  /** Small chevrons in the building's tier colour, one per tier above 1. */
+  function tierPips(x0: number, y0: number, lvl: number) {
+    g.strokeStyle = TIER_BORDER[lvl] ?? "#999";
+    g.lineWidth = tile * 0.035;
+    for (let i = 0; i < lvl - 1; i++) {
+      const cx = x0 + i * tile * 0.13;
+      g.beginPath();
+      g.moveTo(cx, y0);
+      g.lineTo(cx + tile * 0.05, y0 - tile * 0.05);
+      g.lineTo(cx + tile * 0.1, y0);
+      g.stroke();
+    }
+  }
+
+  /**
+   * Port notches: inputs along the top edge, outputs along the bottom. Filled = in use, hollow = free.
+   * (Links can enter from any side; the notches just count slots.)
+   */
+  let linkCounts: { ins: Map<number, number>; outs: Map<number, number> } = { ins: new Map(), outs: new Map() };
+  function ports(n: FactoryNode, x: number, y: number) {
+    const tower = n.towerId ? ctx.factory.towers.get(n.towerId) : undefined;
+    const b = tower ? undefined : ctx.factory.buildings.get(n.buildingId);
+    const ins = tower ? 1 : (b?.inputPorts ?? 0);
+    const outs = tower ? 0 : b?.kind === "generator" ? 0 : (b?.outputPorts ?? 0);
+    const row = (count: number, used: number, cy: number) => {
+      for (let i = 0; i < count; i++) {
+        const cx = x + tile * (0.5 + (i - (count - 1) / 2) * 0.17);
+        g.beginPath();
+        g.arc(cx, cy, tile * 0.045, 0, Math.PI * 2);
+        if (i < used) {
+          g.fillStyle = "#cfd6e0";
+          g.fill();
+        } else {
+          g.strokeStyle = "#7d8592";
+          g.lineWidth = tile * 0.025;
+          g.stroke();
+        }
+      }
+    };
+    row(ins, linkCounts.ins.get(n.id) ?? 0, y + tile * 0.1);
+    row(outs, linkCounts.outs.get(n.id) ?? 0, y + tile * 0.9);
   }
 
   function badge(cx: number, cy: number, status: string) {
@@ -200,6 +242,7 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
     g.beginPath();
     g.arc(c.x, c.y, t.range * tile, 0, Math.PI * 2);
     g.stroke();
+    ports(n, n.x * tile, n.y * tile);
     // body
     g.fillStyle = "#3b3f48";
     g.beginPath();
@@ -345,6 +388,11 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
       g.clearRect(0, 0, canvas.width, canvas.height);
       if (shake) g.translate(Math.sin(time * 90) * shake, Math.cos(time * 77) * shake);
       drawMap();
+      linkCounts = { ins: new Map(), outs: new Map() };
+      for (const l of cur.factory.links) {
+        linkCounts.ins.set(l.to, (linkCounts.ins.get(l.to) ?? 0) + 1);
+        linkCounts.outs.set(l.from, (linkCounts.outs.get(l.from) ?? 0) + 1);
+      }
       drawLinks(cur, time);
       for (const n of cur.factory.nodes) (n.towerId ? drawTower(n, time) : drawBuilding(n));
       drawEnemies(prev, cur, alpha);
