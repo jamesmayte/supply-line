@@ -1,13 +1,13 @@
-// Phase 1 harness: renders sim state (M1.1) and turns touch into sim commands (M1.2).
+// Phase 1 harness: renders sim state (M1.1), turns touch into sim commands (M1.2), run loop UI (M1.3).
 // Throwaway: the sim lives in /core and never imports this. Fixed 10 Hz sim tick; the renderer
 // interpolates between the last two states. Every player action is a GameInput queued for the next tick.
 import { biome1 } from "../content/biome1";
 import { RUN_A, RUN_B, type Script } from "../content/scenarios";
 import type { FactoryNode } from "../core/factory";
-import { applyCommands, makeGameCtx, newGame, spendable, step, type GameInput, type GameState } from "../core/game";
+import { applyCommands, earlyStartBonus, makeGameCtx, newGame, refundOf, spendable, starsFor, step, type GameInput, type GameState } from "../core/game";
 import type { TileXY } from "../core/placement";
 import { createRenderer, type Overlay } from "./render";
-import { buildOptions, costLabel, nodeAt, nodeName, proposeLink } from "./ui";
+import { buildOptions, costLabel, inspect, nodeAt, nodeName, proposeLink } from "./ui";
 
 const MAP = "scrapyard_1";
 const DT = 0.1; // seconds per sim tick (10 Hz)
@@ -32,6 +32,9 @@ let acc = 0;
 let paused = false;
 let speed = 1;
 let overlay: Overlay = {};
+/** Shots per tower over the last few seconds, for the inspect sheet's measured fire rate. */
+let shotHistory: { tick: number; shots: Map<number, number> }[] = [];
+const HISTORY_TICKS = 50; // 5 s
 
 function reset(next: Mode) {
   mode = next;
@@ -39,6 +42,7 @@ function reset(next: Mode) {
   queued = [];
   acc = 0;
   paused = false;
+  shotHistory = [];
   closeSheet();
   syncButtons();
 }
@@ -49,6 +53,15 @@ function tick() {
   prev = cur;
   cur = step(cur, input, DT, ctx);
   if (cur.errors.length) toast(cur.errors.map((e) => e.replace(/^\w+: /, "")).join(" · "));
+  shotHistory.push({ tick: cur.tick, shots: new Map(cur.factory.nodes.filter((n) => n.towerId).map((n) => [n.id, n.shots ?? 0])) });
+  if (shotHistory.length > HISTORY_TICKS + 1) shotHistory.shift();
+}
+
+/** Measured shots/s of a tower over the history window (undefined until there's history). */
+function firingRate(id: number): number | undefined {
+  const first = shotHistory[0], last = shotHistory.at(-1);
+  if (!first || !last || last.tick === first.tick) return undefined;
+  return ((last.shots.get(id) ?? 0) - (first.shots.get(id) ?? 0)) / ((last.tick - first.tick) * DT);
 }
 
 /** Queue a command for the next tick. While paused, apply it at once without advancing time. */
@@ -77,16 +90,27 @@ function toast(text: string) {
 const sheet = $("sheet");
 const sheetTitle = $("sheetTitle");
 const sheetOpts = $("sheetOpts");
-$("sheetClose").onclick = () => closeSheet();
+const sheetLines = $("sheetLines");
+const sheetProblem = $("sheetProblem");
+const sheetCloseBtn = $<HTMLButtonElement>("sheetClose");
+sheetCloseBtn.onclick = () => closeSheet();
 
-interface SheetItem { label: string; note?: string; disabled?: boolean; danger?: boolean; run: () => void }
+interface SheetItem { label: string; note?: string; disabled?: boolean; danger?: boolean; card?: boolean; run: () => void }
+type SheetKind = "build" | "node" | "inspect" | "cards";
+let sheetKind: SheetKind | null = null;
+let inspecting: number | null = null;
 
-function openSheet(title: string, items: SheetItem[], tile?: TileXY) {
+function openSheet(title: string, items: SheetItem[], tile?: TileXY, kind: SheetKind = "build") {
+  sheetKind = kind;
   sheetTitle.textContent = title;
+  sheet.classList.toggle("cards", kind === "cards");
+  sheetCloseBtn.style.display = kind === "cards" ? "none" : ""; // a card must be picked
+  sheetLines.replaceChildren();
+  sheetProblem.style.display = "none";
   sheetOpts.replaceChildren(
     ...items.map((it) => {
       const b = document.createElement("button");
-      b.className = `opt${it.danger ? " danger" : ""}`;
+      b.className = `opt${it.danger ? " danger" : ""}${it.card ? " card" : ""}`;
       b.disabled = !!it.disabled;
       b.append(it.label);
       if (it.note) {
@@ -95,8 +119,8 @@ function openSheet(title: string, items: SheetItem[], tile?: TileXY) {
         b.append(span);
       }
       b.onclick = () => {
+        closeSheet(); // first, so an action may open another sheet
         it.run();
-        closeSheet();
       };
       return b;
     }),
@@ -107,7 +131,48 @@ function openSheet(title: string, items: SheetItem[], tile?: TileXY) {
 
 function closeSheet() {
   sheet.classList.remove("open");
+  sheetKind = null;
+  inspecting = null;
   overlay = {};
+}
+
+/** Tap a building: live stats, plus the first problem upstream in plain words. */
+function openInspect(n: FactoryNode) {
+  openSheet("", [{ label: "Remove / unlink…", note: "or hold the building", run: () => openNodeMenu(n) }], n, "inspect");
+  inspecting = n.id;
+  refreshInspect();
+}
+
+function refreshInspect() {
+  const n = cur.factory.nodes.find((x) => x.id === inspecting);
+  if (!n) return closeSheet();
+  const info = inspect(ctx, cur, n, n.towerId ? firingRate(n.id) : undefined);
+  sheetTitle.textContent = info.title;
+  sheetLines.replaceChildren(
+    ...info.lines.flatMap((l) => {
+      const a = document.createElement("span");
+      a.textContent = l.label;
+      const b = document.createElement("b");
+      b.textContent = l.value;
+      if (l.tone) b.className = l.tone;
+      return [a, b];
+    }),
+  );
+  sheetProblem.style.display = info.problem ? "block" : "none";
+  sheetProblem.textContent = info.problem ? humanize(info.problem) : "";
+}
+
+function openCardPick() {
+  const offer = cur.cardOffer ?? [];
+  openSheet(
+    `Wave ${cur.waveIndex} cleared: pick a card`,
+    offer.map((id) => {
+      const c = ctx.cards.get(id)!;
+      return { label: c.name, note: c.text, card: true, run: () => send({ type: "pickCard", cardId: id }) };
+    }),
+    undefined,
+    "cards",
+  );
 }
 
 function openBuildMenu(t: TileXY) {
@@ -132,7 +197,12 @@ function openNodeMenu(n: FactoryNode) {
   const byId = new Map(cur.factory.nodes.map((x) => [x.id, x]));
   const links = cur.factory.links.filter((l) => l.from === n.id || l.to === n.id);
   const items: SheetItem[] = [
-    { label: "Remove", note: "no refund", danger: true, run: () => send({ type: "remove", nodeId: n.id }) },
+    {
+      label: "Remove",
+      note: refundOf(cur, ctx, n).length ? `refund ${costLabel(ctx, refundOf(cur, ctx, n).map((c) => ({ ...c, qty: Math.floor(c.qty + 1e-9) })))}` : "free",
+      danger: true,
+      run: () => send({ type: "remove", nodeId: n.id }),
+    },
     ...links.map((l) => {
       const other = byId.get(l.from === n.id ? l.to : l.from)!;
       const dir = l.from === n.id ? "→" : "←";
@@ -140,7 +210,7 @@ function openNodeMenu(n: FactoryNode) {
       return { label: `Unlink ${dir} ${nodeName(ctx, other)}`, note: `${item}, tier ${l.tier}`, run: () => send({ type: "unlink", linkId: l.id }) };
     }),
   ];
-  openSheet(nodeName(ctx, n), items, n);
+  openSheet(nodeName(ctx, n), items, n, "node");
 }
 
 /* ---------- touch: tap = build menu, drag node→node = link, long-press node = remove/unlink ---------- */
@@ -201,7 +271,7 @@ function endGesture(e: PointerEvent, cancelled: boolean) {
   }
   // a tap
   if (g.node) {
-    toast(`${nodeName(ctx, g.node)}: drag to another building to link, hold to remove`);
+    openInspect(g.node);
     return;
   }
   if (sheet.classList.contains("open")) closeSheet();
@@ -213,7 +283,9 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 /* ---------- HUD ---------- */
 const hud = { wave: $("wave"), core: $("core"), ingots: $("ingots"), kills: $("kills"), next: $("next") };
-const banner = $("banner");
+const result = { el: $("result"), title: $("resultTitle"), stars: $("resultStars"), text: $("resultText") };
+$("restart").onclick = () => reset(mode);
+let lastInspectRefresh = 0;
 const buttons = {
   empty: $<HTMLButtonElement>("demoEmpty"),
   A: $<HTMLButtonElement>("demoA"),
@@ -239,10 +311,25 @@ function syncHud() {
   hud.kills.textContent = String(cur.kills);
   hud.next.textContent =
     cur.phase === "build" ? `Next: ${waveSummary(cur.waveIndex)}` : cur.phase === "wave" ? `Now: ${waveSummary(cur.waveIndex)}` : "";
-  buttons.start.disabled = cur.phase !== "build" || queued.some((q) => q.type === "startWave");
-  banner.style.display = cur.phase === "won" || cur.phase === "lost" ? "flex" : "none";
-  banner.textContent = cur.phase === "won" ? "Won" : cur.phase === "lost" ? "Core destroyed" : "";
-  banner.style.color = cur.phase === "won" ? "#7fd48a" : "#e0574a";
+  const pending = queued.some((q) => q.type === "startWave");
+  buttons.start.disabled = cur.phase !== "build" || pending || !!cur.cardOffer;
+  const bonus = cur.phase === "build" ? earlyStartBonus(cur, ctx).qty : 0;
+  buttons.start.textContent = bonus > 0 ? `Start wave +${bonus}` : "Start wave";
+
+  // a card must be picked before the next wave
+  const picking = queued.some((q) => q.type === "pickCard"); // tapped, applied on the next tick
+  if (cur.cardOffer && cur.phase === "build" && sheetKind !== "cards" && !picking) openCardPick();
+
+  const over = cur.phase === "won" || cur.phase === "lost";
+  result.el.classList.toggle("show", over);
+  if (over) {
+    const stars = starsFor(cur, ctx, map.coreHp);
+    result.title.textContent = cur.phase === "won" ? "Map cleared" : "Core destroyed";
+    result.title.style.color = cur.phase === "won" ? "#7fd48a" : "#e0574a";
+    result.stars.textContent = cur.phase === "won" ? "★".repeat(stars) + "☆".repeat(3 - stars) : "";
+    const cleared = cur.phase === "won" ? map.waves.length : cur.waveIndex;
+    result.text.textContent = `Waves cleared ${cleared}/${map.waves.length} · kills ${cur.kills} · core ${Math.ceil(cur.coreHp)}/${map.coreHp}`;
+  }
 }
 
 function syncButtons() {
@@ -293,6 +380,10 @@ function frame(now: number) {
   }
   renderer.draw(prev, cur, paused ? 1 : acc / DT, now / 1000, overlay);
   syncHud();
+  if (sheetKind === "inspect" && now - lastInspectRefresh > 400) {
+    lastInspectRefresh = now;
+    refreshInspect();
+  }
   requestAnimationFrame(frame);
 }
 
