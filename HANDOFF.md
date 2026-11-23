@@ -301,7 +301,7 @@ single boost, not even +15% everywhere (the link capped it), could help. Fixed i
 https://jamesmayte.github.io/supply-line/ (after merge).
 1. **Demo: 1 chain**: tap the extractor next to the smelter → see "Link slots used" and **Upgrade to tier 2**.
 2. Upgrade it, then tap the smelter: it's now the busy one. Watch the cards after the next wave.
-3. Hold-free: tap a Gunner → **Move** → tap a new tile.
+3. Tap a Gunner → **Move** → tap a new tile (between waves only).
 4. Look at the hub's links in **Demo: 2 chains**: they run side by side now.
 5. Does speeding things up feel worth it now? Is the layout easier to manage?
 
