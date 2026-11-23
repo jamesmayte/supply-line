@@ -3,11 +3,13 @@
 // interpolates between the last two states. Every player action is a GameInput queued for the next tick.
 import { biome1 } from "../content/biome1";
 import { RUN_A, RUN_B, type Script } from "../content/scenarios";
-import type { FactoryNode } from "../core/factory";
-import { applyCommands, earlyStartBonus, makeGameCtx, newGame, refundOf, spendable, starsFor, step, type GameInput, type GameState } from "../core/game";
+import { adviseCards, bestCard, findBottleneck } from "../core/analysis";
+import { towerOf, type FactoryNode } from "../core/factory";
+import { applyCommands, earlyStartBonus, makeGameCtx, newGame, pickTarget, refundOf, spendable, starsFor, step, type GameInput, type GameState } from "../core/game";
+import { positionAt, tileCentre } from "../core/path";
 import type { TileXY } from "../core/placement";
-import { createRenderer, type Overlay } from "./render";
-import { buildOptions, costLabel, inspect, nodeAt, nodeName, proposeLink } from "./ui";
+import { createRenderer, effectAlive, ENEMY_STYLE_OF, STATUS_BADGE, type Effect, type Overlay } from "./render";
+import { buildOptions, cardNote, costLabel, inspect, nodeAt, nodeName, proposeLink, waveReport, type WaveStats } from "./ui";
 
 const MAP = "scrapyard_1";
 const DT = 0.1; // seconds per sim tick (10 Hz)
@@ -34,6 +36,21 @@ let speed = 1;
 let overlay: Overlay = {};
 /** Shots per tower over the last few seconds, for the inspect sheet's measured fire rate. */
 let shotHistory: { tick: number; shots: Map<number, number> }[] = [];
+/** Cosmetic effects derived from consecutive states (tracers, pops, core hits). */
+let effects: Effect[] = [];
+/** Numbers for the current / last wave's report. */
+let waveStats: WaveStats | null = null;
+let lastWave: WaveStats | null = null;
+
+/** Ammo items made so far (assemblers whose recipe makes an ammo item). */
+function ammoProduced(s: GameState): number {
+  return s.factory.nodes.reduce((a, n) => {
+    const r = n.recipeId ? ctx.factory.recipes.get(n.recipeId) : undefined;
+    const out = r ? ctx.factory.items.get(r.outputs[0]!.itemId) : undefined;
+    return out?.kind === "ammo" ? a + n.produced : a;
+  }, 0);
+}
+const totalShots = (s: GameState) => s.factory.nodes.reduce((a, n) => a + (n.shots ?? 0), 0);
 const HISTORY_TICKS = 50; // 5 s
 
 function reset(next: Mode) {
@@ -43,6 +60,8 @@ function reset(next: Mode) {
   acc = 0;
   paused = false;
   shotHistory = [];
+  effects = [];
+  waveStats = lastWave = null;
   closeSheet();
   syncButtons();
 }
@@ -54,7 +73,57 @@ function tick() {
   cur = step(cur, input, DT, ctx);
   if (cur.errors.length) toast(cur.errors.map((e) => e.replace(/^\w+: /, "")).join(" · "));
   shotHistory.push({ tick: cur.tick, shots: new Map(cur.factory.nodes.filter((n) => n.towerId).map((n) => [n.id, n.shots ?? 0])) });
+  deriveEffects(prev, cur);
+  trackWave(prev, cur);
   if (shotHistory.length > HISTORY_TICKS + 1) shotHistory.shift();
+}
+
+/** Tracers, hit flashes, death pops and core hits, worked out by comparing two states. Cosmetic only. */
+function deriveEffects(a: GameState, b: GameState) {
+  const now = performance.now() / 1000;
+  const before = new Map(a.factory.nodes.map((n) => [n.id, n]));
+  for (const n of b.factory.nodes) {
+    const tower = towerOf(ctx.factory, n);
+    const fired = (n.shots ?? 0) - (before.get(n.id)?.shots ?? 0);
+    if (!tower || fired <= 0) continue;
+    const target = pickTarget(ctx, a.enemies, n, tower) ?? pickTarget(ctx, b.enemies, n, tower);
+    if (!target) continue;
+    const to = positionAt(ctx.path, target.d);
+    effects.push({ kind: "tracer", from: tileCentre(n.x, n.y), to, t: now }, { kind: "hit", at: to, t: now });
+  }
+  const alive = new Set(b.enemies.map((e) => e.id));
+  const leaks = b.leaked - a.leaked;
+  for (const e of a.enemies) {
+    if (alive.has(e.id)) continue;
+    const def = ctx.enemies.get(e.enemyId)!;
+    if (leaks > 0 && e.d + def.speed * DT >= ctx.path.length - 1e-6) continue; // reached the core
+    const st = ENEMY_STYLE_OF(e.enemyId);
+    effects.push({ kind: "pop", at: positionAt(ctx.path, e.d), r: st.r, colour: st.colour, t: now });
+  }
+  if (b.coreHp < a.coreHp) effects.push({ kind: "coreHit", t: now });
+}
+
+/** Count what happens during a wave for the between-wave report. */
+function trackWave(a: GameState, b: GameState) {
+  if (a.phase !== "wave" && b.phase === "wave")
+    waveStats = { kills: -a.kills, leaked: -a.leaked, shots: -totalShots(a), ammoMade: -ammoProduced(a), towerTicks: 0, emptyTicks: 0 };
+  if (!waveStats) return;
+  if (b.enemies.length)
+    for (const n of b.factory.nodes)
+      if (n.towerId) {
+        waveStats.towerTicks++;
+        if (n.status === "starved") waveStats.emptyTicks++;
+      }
+  if (b.phase !== "wave") {
+    lastWave = {
+      ...waveStats,
+      kills: waveStats.kills + b.kills,
+      leaked: waveStats.leaked + b.leaked,
+      shots: waveStats.shots + totalShots(b),
+      ammoMade: waveStats.ammoMade + ammoProduced(b),
+    };
+    waveStats = null;
+  }
 }
 
 /** Measured shots/s of a tower over the history window (undefined until there's history). */
@@ -91,12 +160,13 @@ const sheet = $("sheet");
 const sheetTitle = $("sheetTitle");
 const sheetOpts = $("sheetOpts");
 const sheetLines = $("sheetLines");
+const sheetExtra = $("sheetExtra");
 const sheetProblem = $("sheetProblem");
 const sheetCloseBtn = $<HTMLButtonElement>("sheetClose");
 sheetCloseBtn.onclick = () => closeSheet();
 
-interface SheetItem { label: string; note?: string; disabled?: boolean; danger?: boolean; card?: boolean; run: () => void }
-type SheetKind = "build" | "node" | "inspect" | "cards";
+interface SheetItem { label: string; note?: string; note2?: string; best?: string; disabled?: boolean; danger?: boolean; card?: boolean; run: () => void }
+type SheetKind = "build" | "node" | "inspect" | "cards" | "help";
 let sheetKind: SheetKind | null = null;
 let inspecting: number | null = null;
 
@@ -106,6 +176,7 @@ function openSheet(title: string, items: SheetItem[], tile?: TileXY, kind: Sheet
   sheet.classList.toggle("cards", kind === "cards");
   sheetCloseBtn.style.display = kind === "cards" ? "none" : ""; // a card must be picked
   sheetLines.replaceChildren();
+  sheetExtra.replaceChildren();
   sheetProblem.style.display = "none";
   sheetOpts.replaceChildren(
     ...items.map((it) => {
@@ -113,10 +184,18 @@ function openSheet(title: string, items: SheetItem[], tile?: TileXY, kind: Sheet
       b.className = `opt${it.danger ? " danger" : ""}${it.card ? " card" : ""}`;
       b.disabled = !!it.disabled;
       b.append(it.label);
-      if (it.note) {
+      for (const text of [it.note, it.note2]) {
+        if (!text) continue;
         const span = document.createElement("span");
-        span.textContent = it.note;
+        span.textContent = text;
         b.append(span);
+      }
+      if (it.best) {
+        b.classList.add("recommended");
+        const tag = document.createElement("span");
+        tag.className = "best";
+        tag.textContent = it.best;
+        b.append(tag);
       }
       b.onclick = () => {
         closeSheet(); // first, so an action may open another sheet
@@ -162,18 +241,87 @@ function refreshInspect() {
   sheetProblem.textContent = info.problem ? humanize(info.problem) : "";
 }
 
+/** After a wave: what happened, what's holding ammo back, and what each card would do for this factory. */
 function openCardPick() {
   const offer = cur.cardOffer ?? [];
+  const bottleneck = findBottleneck(cur.factory, ctx.factory);
+  const advice = adviseCards(cur, ctx, offer);
+  const best = bestCard(advice);
   openSheet(
     `Wave ${cur.waveIndex} cleared: pick a card`,
     offer.map((id) => {
       const c = ctx.cards.get(id)!;
-      return { label: c.name, note: c.text, card: true, run: () => send({ type: "pickCard", cardId: id }) };
+      const a = advice.find((x) => x.cardId === id)!;
+      return { label: c.name, note: c.text, note2: cardNote(a), best: id === best ? "Best for you" : undefined, card: true, run: () => send({ type: "pickCard", cardId: id }) };
     }),
     undefined,
     "cards",
   );
+  if (lastWave) {
+    const r = waveReport(ctx, lastWave, bottleneck);
+    const box = document.createElement("div");
+    box.className = "report";
+    for (const l of r.lines) {
+      const a = document.createElement("span");
+      a.textContent = l.label;
+      const b = document.createElement("b");
+      b.textContent = l.value;
+      if (l.tone) b.className = l.tone;
+      box.append(a, b);
+    }
+    const tip = document.createElement("div");
+    tip.className = "wide";
+    tip.textContent = humanize(r.advice);
+    box.append(tip);
+    sheetExtra.replaceChildren(box);
+  }
 }
+
+/** "?" button (and first visit): how to play + what the symbols mean. */
+function openHelp() {
+  openSheet("How to play", [], undefined, "help");
+  const steps = document.createElement("ol");
+  steps.className = "howto";
+  for (const t of [
+    "Tap an empty tile to build. Extractors go on ore (blue = iron, dark = coal).",
+    "Drag from one building to another to link them: ore → Smelter → Assembler → Gunner.",
+    "Smelters and Assemblers need power: a Generator (P) fed with coal, within 3 tiles.",
+    "Gunners only shoot while they have bullets. Tap any building to see what it's doing and what's holding it back.",
+    "Start wave when ready. After each wave, pick a card: the report tells you which one helps most.",
+  ]) {
+    const li = document.createElement("li");
+    li.textContent = t;
+    steps.append(li);
+  }
+  const legend = document.createElement("div");
+  legend.className = "legend";
+  for (const st of Object.values(STATUS_BADGE)) {
+    const i = document.createElement("i");
+    i.textContent = st.symbol;
+    i.style.background = st.colour;
+    const t = document.createElement("span");
+    t.textContent = st.label;
+    legend.append(i, t);
+  }
+  const key = (symbol: string, colour: string, text: string) => {
+    const k = document.createElement("span");
+    k.className = "key";
+    k.textContent = symbol;
+    k.style.color = colour;
+    const t = document.createElement("span");
+    t.textContent = text;
+    legend.append(k, t);
+  };
+  const ring = document.createElement("span");
+  ring.className = "key";
+  ring.innerHTML = '<span style="display:inline-block;width:16px;height:16px;border-radius:50%;border:3px solid #f2c14e;box-sizing:border-box"></span>';
+  const ringText = document.createElement("span");
+  ringText.textContent = "Gunner ring and number: rounds in the magazine. Flashing red = empty, it can't shoot.";
+  legend.append(ring, ringText);
+  key("•••", "#f2c14e", "Moving dots on a link: items flowing. More dots, faster = more per second.");
+  sheetExtra.replaceChildren(steps, legend);
+}
+$("help").onclick = () => (sheetKind === "help" ? closeSheet() : openHelp());
 
 function openBuildMenu(t: TileXY) {
   const opts = buildOptions(ctx, cur, t.x, t.y);
@@ -378,7 +526,9 @@ function frame(now: number) {
     }
     if (n >= MAX_STEPS_PER_FRAME) acc = 0;
   }
-  renderer.draw(prev, cur, paused ? 1 : acc / DT, now / 1000, overlay);
+  const t = now / 1000;
+  effects = effects.filter((e) => effectAlive(e, t));
+  renderer.draw(prev, cur, paused ? 1 : acc / DT, t, overlay, effects);
   syncHud();
   if (sheetKind === "inspect" && now - lastInspectRefresh > 400) {
     lastInspectRefresh = now;
@@ -389,7 +539,15 @@ function frame(now: number) {
 
 window.addEventListener("resize", () => renderer.resize());
 reset("empty");
+try {
+  if (!localStorage.getItem("sl.seenHelp")) {
+    openHelp();
+    localStorage.setItem("sl.seenHelp", "1");
+  }
+} catch {
+  /* storage unavailable: just don't auto-open */
+}
 requestAnimationFrame(frame);
 
 // Debug handle for poking at state from the console.
-(window as unknown as { sl: unknown }).sl = { get state() { return cur; }, ctx, send };
+(window as unknown as { sl: unknown }).sl = { get state() { return cur; }, get effects() { return effects; }, ctx, send };
