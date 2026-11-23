@@ -265,14 +265,28 @@ function settle(state: GameState, ctx: GameCtx): void {
   }
 }
 
-/** Advance the whole game by one tick of dt seconds. Pure: returns a new state. */
-export function step(state: GameState, input: readonly GameInput[], dt: number, ctx: GameCtx): GameState {
-  const next = structuredClone(state);
+function applyAll(next: GameState, ctx: GameCtx, input: readonly GameInput[]): void {
   next.errors = [];
   for (const cmd of input) {
     const err = applyInput(next, ctx, cmd);
     if (err) next.errors.push(`${cmd.type}: ${err}`);
   }
+}
+
+/**
+ * Apply player commands without advancing time (phase 1 of step only). Used to build while paused.
+ * Pure: returns a new state. step(s, input, dt) ≡ simulating dt after applyCommands(s, input).
+ */
+export function applyCommands(state: GameState, input: readonly GameInput[], ctx: GameCtx): GameState {
+  const next = structuredClone(state);
+  applyAll(next, ctx, input);
+  return next;
+}
+
+/** Advance the whole game by one tick of dt seconds. Pure: returns a new state. */
+export function step(state: GameState, input: readonly GameInput[], dt: number, ctx: GameCtx): GameState {
+  const next = structuredClone(state);
+  applyAll(next, ctx, input);
   if (next.phase === "won" || next.phase === "lost") return next;
   spawn(next, ctx, dt);
   moveEnemies(next, ctx, dt);

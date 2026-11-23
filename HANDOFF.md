@@ -144,10 +144,40 @@ https://jamesmayte.github.io/supply-line/
 2. Tap **2×**, then **Start wave**. Start each next wave when the button lights up again.
 3. Tap **1 chain** to reset with the single-chain build and compare: Gunners run dry (red rings) and walkers leak.
 
+- **M1.2 done** (touch input):
+  - **Tap an empty tile** → bottom-sheet build menu: only what's valid there, with ingot cost; unaffordable
+    greyed out; one assembler entry per unlocked recipe; research-locked items (Cannon, shells, Press) and
+    Lab hidden. Tap the map or Close to dismiss.
+  - **Drag from a building to another** → link. Live preview along the L-route: green = valid, red = not;
+    a bad drop shows a toast with the reason. Tier = lowest whose length limit fits. Out of a hub the link
+    carries what the target wants (most-held first).
+  - **Long-press a building** → sheet with Remove (no refund) and Unlink ↔ each of its links.
+  - **Tap a building** → hint toast (inspect sheet comes in M1.3).
+  - Bottom bar: **Empty** (default: 20 ingots, build it yourself) / Demo: 1 chain / Demo: 2 chains.
+  - **Building while paused** is instant and doesn't advance time: new `applyCommands(state, input, ctx)`
+    in `core/game.ts` = step's command phase only (tested: applyCommands then an empty step ≡ step with input).
+  - HUD "Ingots" = stockpile + ingots held in hubs (what you can spend). Toasts use item names, not ids.
+  - `harness/ui.ts` (DOM-free: build options, link proposals) + `tests/harness-ui.test.ts` (11 tests).
+    Total 98 green, typecheck clean.
+  - Checked end to end in headless Chromium (iPhone 13, touch): built a full chain by tapping + dragging while
+    paused, a bad link was refused with a toast, long-press removed a hub, the hand-built Gunner killed walkers.
+
+### What to try on the phone (M1.2)
+
+https://jamesmayte.github.io/supply-line/ (after merge). It opens on **Empty** with 20 ingots.
+1. Tap **Pause** (building while paused is instant).
+2. Tap the dark coal tile at the top right (column 8, row 4) → **Extractor**. Tap the tile below → **Generator**.
+3. Tap a blue iron tile (right side, rows 8–9) → **Extractor**. Next to it on ground → **Smelter**,
+   then **Assembler: bullets**, then a **Gunner** beside the path.
+4. Drag: coal extractor → generator, iron extractor → smelter → assembler → Gunner.
+   (The smelter and assembler must be within 3 tiles of the generator, or they show grey = unpowered.)
+5. Tap **Play**, wait for the Gunner's ring to fill, then **Start wave**.
+6. Hold a building to remove it or unlink it.
+
 ## Next
 
-**M1.2 — Touch input** (see `docs/build-plan.md`): tap tile → build menu, drag building → building = link,
-long-press → delete. The demo switch can then become "start empty / load demo".
+**M1.3 — Run loop** (see `docs/build-plan.md`): 15 waves with card picks between waves, a result screen,
+and the inspect sheet. Includes James's progression proposals (easy early waves, early-start bonus) as content/tuning.
 
 ## Decisions so far
 
@@ -192,6 +222,14 @@ long-press → delete. The demo switch can then become "start empty / load demo"
 
 - Biome 1 enemy HP doubled (walker 80, swarmer 24, armoured 240). The M0.5 sanity table predates this.
 - The interlock scenario uses 3 Gunners so that ammo, not tower count, is the binding constraint.
+
+## Decisions in M1.2 (easy to change, flag if wrong)
+
+- **Link tier is free:** a drag gets the lowest tier long enough, so links over 6 tiles are tier 2 (4/s) with
+  no research. Slightly generous vs the spec; revisit with research in M1.4.
+- Remove has no refund in any phase (spec: full refund in build breaks, 50% in waves). Revisit with M1.3.
+- One finger at a time; no scroll/zoom (scrapyard_1 fits on screen). Taller maps will need scrolling.
+- `applyCommands` exists only for building while paused; replays (none yet) would need to record those commands.
 
 ## Decisions in M1.1
 
