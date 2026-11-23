@@ -221,10 +221,52 @@ https://jamesmayte.github.io/supply-line/ (after merge). Use **Demo: 1 chain** f
 5. Play on until you win or lose → result screen → **Play again**.
 6. Tell me how waves 1–4 feel (too easy?), where it gets hard, and whether cards feel worth picking.
 
+## Phase 1 check, first playtest (James, after M1.3): not fun yet
+
+Lost on wave 15 (14 cleared, 184 kills), so the curve is roughly right. But:
+- "A lot works but it doesn't feel very engaging."
+- Didn't know what the yellow/green/full/empty bars meant; the UI should be easier to figure out.
+- Ran out of map space; hard to plan a layout before knowing how it all works.
+- Speed cards made no visible difference; switched to +ingots until out of space.
+
+Diagnosis: towers firing was invisible (no tracers or hits); two overlapping visual codes with no legend;
+no way to move or upgrade, so growth = sprawl; single-stage +25% cards do nothing on a balanced chain
+(every stage is at its limit), and nothing said so. Per the build plan, fix feedback before features:
+**M1.5 (readability and feel) now, M1.6 (room to grow) next, research (M1.4) after.**
+
+- **M1.5 done** (readability and feel):
+  - **Juice:** shot tracers + hit flashes, death pops, a red flash + short shake when the core is hit.
+    All cosmetic, derived in the harness by comparing consecutive states (`core` unchanged).
+  - **One status badge per building** (✓ working, ■ backed up, ✕ starved, ⚡ no power, · idle) replaces the
+    coloured border + utilisation bar. Gunners show rounds left under the G. Hubs keep a fill bar.
+  - **"?" button:** how to play (5 steps) + legend for badges, magazine ring and link dots. Opens once on first visit.
+  - **Between-wave report** above the card pick: kills, got through, bullets made / fired, % of the wave
+    Gunners were empty, ammo ceiling, and one line of advice: "Bottleneck: Smelters…", "A link is carrying
+    its maximum…", "Every stage is at its limit: build another chain", "Gunners rarely ran dry: add a Gunner…",
+    or "Clean wave… to get ahead, …".
+  - **Card advice (James's idea):** each card shows what it would do for *this* factory, e.g.
+    "+25% ammo on your current setup (2 → 2.5/s)" or "No gain: another stage limits it". The best is badged
+    **Best for you**; if no speed card helps, the ingot card is recommended (another chain is the fix).
+  - New `core/analysis.ts` (pure): `ammoRate` (factory ceiling with towers as bottomless sinks),
+    `findBottleneck` (which building type / link would raise it), `adviseCards`, `bestCard`.
+    The analysis runs once when the card pick opens (~20 ms, no visible stall).
+  - Tests: `tests/analysis.test.ts` (8), report/card-note wording in `tests/harness-ui.test.ts`.
+    Total 123 green, typecheck clean. Checked on an emulated iPhone 13: help on first visit, tracers firing,
+    report + advice after wave 1, no page errors.
+
+### What to try on the phone (M1.5)
+
+https://jamesmayte.github.io/supply-line/ (after merge). The help sheet opens on your first visit (later: **?**).
+1. **Demo: 2 chains**, **2×**, **Start wave**: watch the tracers, hit flashes and pops.
+2. After the wave, read the report and the line under each card. Is the advice clear and right?
+3. Build your own on **Empty**; make a chain where one stage is short (e.g. 2 extractors into 1 smelter)
+   and see the report name it and a card show a gain.
+4. Is it easier to tell what's going on? Does it feel more alive?
+
 ## Next
 
-**Phase 1 gate (James):** play one 15-wave run on the phone. Is it fun with no meta? Write the verdict here.
-Then **M1.4 — Research (minimal)**: Lab, red science pack, 4–6 research nodes (Cannon + shells, tier-2 links, …).
+**M1.6 — Room to grow** (proposal in `docs/build-plan.md`): move buildings, upgrade in place, cards you can feel.
+Then M1.4 research, then re-run the Phase 1 check.
 
 ## Decisions so far
 
@@ -269,6 +311,14 @@ Then **M1.4 — Research (minimal)**: Lab, red science pack, 4–6 research node
 
 - Biome 1 enemy HP doubled (walker 80, swarmer 24, armoured 240). The M0.5 sanity table predates this.
 - The interlock scenario uses 3 Gunners so that ammo, not tower count, is the binding constraint.
+
+## Decisions in M1.5 (easy to change, flag if wrong)
+
+- Effects (tracers, pops, shake) are harness-only, derived from state diffs; the sim has no event list.
+- "Ammo ceiling" treats towers as bottomless sinks, so it measures the factory, not tower uptime.
+- A card's gain is projected from the factory as it is now (60 s simulated); it doesn't model what you'll build next.
+- A full link is only blamed if a higher tier would actually raise ammo (else every balanced chain would blame its links).
+- M1.5 was added before M1.4 (research) per the build plan: fix feedback before adding features.
 
 ## Decisions in M1.3 (easy to change, flag if wrong)
 

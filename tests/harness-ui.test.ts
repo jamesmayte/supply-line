@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { biome1 } from "../content/biome1";
 import { makeGameCtx, newGame, step, type GameInput, type GameState } from "../core/game";
-import { buildOptions, inspect, nodeAt, proposeLink, upstreamProblem } from "../harness/ui";
+import { buildOptions, cardNote, inspect, nodeAt, proposeLink, upstreamProblem, waveReport, type WaveStats } from "../harness/ui";
 
 const ctx = makeGameCtx(biome1, "scrapyard_1");
 const fresh = () => newGame(biome1, "scrapyard_1", 1);
@@ -140,5 +140,39 @@ describe("inspect sheet", () => {
     expect(info.problem).toBeUndefined();
     const smelter = inspect(ctx, s, s.factory.nodes.find((n) => n.id === sm)!);
     expect(smelter.lines.find((l) => l.label === "Utilisation")?.value).toBe("100%");
+  });
+});
+
+describe("wave report and card notes", () => {
+  const stats = (over: Partial<WaveStats> = {}): WaveStats => ({ kills: 5, leaked: 1, shots: 40, ammoMade: 42, towerTicks: 100, emptyTicks: 40, ...over });
+  const none = { ammoRate: 2, limiting: [], cappedLinks: [] };
+
+  it("names the bottleneck building and its gain", () => {
+    const r = waveReport(ctx, stats(), { ammoRate: 2, limiting: [{ buildingId: "smelter", gainPct: 25 }], cappedLinks: [] });
+    expect(r.advice).toBe("Bottleneck: Smelters. Speeding them up 25% would raise ammo by 25%.");
+    expect(r.lines.find((l) => l.label === "Gunners empty")).toMatchObject({ value: "40% of the wave", tone: "bad" });
+  });
+
+  it("a balanced chain says build another chain; a capped link says so", () => {
+    expect(waveReport(ctx, stats(), none).advice).toMatch(/build another chain/);
+    expect(waveReport(ctx, stats(), { ...none, cappedLinks: [3] }).advice).toMatch(/link is carrying its maximum/);
+  });
+
+  it("if Gunners rarely ran dry but enemies got through, ammo isn't the problem", () => {
+    expect(waveReport(ctx, stats({ emptyTicks: 2 }), { ...none, limiting: [{ buildingId: "smelter", gainPct: 25 }] }).advice).toMatch(/add a Gunner/);
+  });
+
+  it("a clean wave says so before the tip", () => {
+    expect(waveReport(ctx, stats({ leaked: 0, emptyTicks: 3 }), none).advice).toBe("Clean wave: nothing got through. To get ahead, another chain is the way to more ammo.");
+  });
+
+  it("no ammo at all says so", () => {
+    expect(waveReport(ctx, stats(), { ammoRate: 0, limiting: [], cappedLinks: [] }).advice).toMatch(/No ammo is reaching/);
+  });
+
+  it("card notes show the projected gain, or that it won't help", () => {
+    expect(cardNote({ cardId: "hot_smelters", kind: "ammo", baseline: 2, projected: 2.5, gainPct: 25 })).toBe("+25% ammo on your current setup (2 → 2.5/s)");
+    expect(cardNote({ cardId: "better_drills", kind: "ammo", baseline: 2, projected: 2, gainPct: 0 })).toMatch(/No gain/);
+    expect(cardNote({ cardId: "scrap_haul", kind: "grant", items: [{ itemId: "iron_ingot", qty: 8 }] })).toMatch(/^Build now/);
   });
 });

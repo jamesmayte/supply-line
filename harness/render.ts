@@ -16,9 +16,6 @@ const ITEM_COLOURS: Record<string, string> = {
   iron_ore: "#8fb0cf", coal: "#5a5a5a", iron_ingot: "#d8dde3", plate: "#b9c2cc", powder: "#7a7a7a",
   bullets: "#f2c14e", shells: "#e88a3a", red_pack: "#e0574a",
 };
-const STATUS_COLOURS: Record<string, string> = {
-  working: "#5fbf6a", starved: "#e0574a", backlogged: "#e0b04a", unpowered: "#6f737b", idle: "#4a4e56",
-};
 const KIND_LETTERS: Record<string, string> = {
   extractor: "E", processor: "S", assembler: "A", hub: "H", generator: "P", lab: "L",
 };
@@ -36,8 +33,29 @@ export interface Overlay {
   drag?: { route: TileXY[]; ok: boolean; end: Point };
 }
 
+/** Cosmetic one-off effects (map units, seconds since page load). Never feed back into the sim. */
+export type Effect =
+  | { kind: "tracer"; from: Point; to: Point; t: number }
+  | { kind: "hit"; at: Point; t: number }
+  | { kind: "pop"; at: Point; r: number; colour: string; t: number }
+  | { kind: "coreHit"; t: number };
+
+const EFFECT_LIFE: Record<Effect["kind"], number> = { tracer: 0.18, hit: 0.2, pop: 0.4, coreHit: 0.4 };
+export const effectAlive = (e: Effect, now: number) => now - e.t < EFFECT_LIFE[e.kind];
+
+/** Status badge per building: one symbol + colour, explained in the "?" legend. */
+export const STATUS_BADGE: Record<string, { symbol: string; colour: string; label: string }> = {
+  working: { symbol: "✓", colour: "#5fbf6a", label: "Working: running at full speed" },
+  backlogged: { symbol: "■", colour: "#e0b04a", label: "Backed up: output is full, nothing is taking it" },
+  starved: { symbol: "✕", colour: "#e0574a", label: "Starved: waiting for input" },
+  unpowered: { symbol: "⚡", colour: "#8a8f99", label: "No power: needs a generator within 3 tiles, fed with coal" },
+  idle: { symbol: "·", colour: "#6f737b", label: "Idle: nothing to do yet" },
+};
+
+export const ENEMY_STYLE_OF = (id: string) => ENEMY_STYLE[id] ?? { colour: "#ff6ad5", r: 0.22 };
+
 export interface Renderer {
-  draw(prev: GameState, cur: GameState, alpha: number, time: number, overlay?: Overlay): void;
+  draw(prev: GameState, cur: GameState, alpha: number, time: number, overlay?: Overlay, effects?: readonly Effect[]): void;
   resize(): void;
   /** Tile under a client-space point, or undefined if off the map. */
   tileAt(clientX: number, clientY: number): TileXY | undefined;
@@ -142,21 +160,35 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
     g.fillStyle = "#2f343d";
     roundRect(x + pad, y + pad, s, s, tile * 0.15);
     g.fill();
-    g.strokeStyle = STATUS_COLOURS[n.status] ?? "#888";
-    g.lineWidth = tile * 0.06;
+    g.strokeStyle = "#4a505b";
+    g.lineWidth = tile * 0.04;
     g.stroke();
     g.fillStyle = "#e8e6e1";
-    g.font = `600 ${tile * 0.38}px system-ui, sans-serif`;
+    g.font = `600 ${tile * 0.4}px system-ui, sans-serif`;
     g.textAlign = "center";
     g.textBaseline = "middle";
-    g.fillText(KIND_LETTERS[b.kind] ?? "?", x + tile / 2, y + tile * 0.45);
-    // utilisation bar (hubs show fill instead)
-    const frac = b.kind === "hub" ? Object.values(n.inputs).reduce((a, v) => a + v, 0) / b.bufferSize : n.utilisation;
-    const bw = s - tile * 0.16;
-    g.fillStyle = "rgba(0,0,0,0.45)";
-    g.fillRect(x + pad + tile * 0.08, y + tile * 0.72, bw, tile * 0.08);
-    g.fillStyle = STATUS_COLOURS[n.status] ?? "#888";
-    g.fillRect(x + pad + tile * 0.08, y + tile * 0.72, bw * Math.max(0, Math.min(1, frac)), tile * 0.08);
+    g.fillText(KIND_LETTERS[b.kind] ?? "?", x + tile / 2, y + tile * 0.52);
+    if (b.kind === "hub") {
+      // hubs: how full the store is
+      const frac = Object.values(n.inputs).reduce((a, v) => a + v, 0) / b.bufferSize;
+      g.fillStyle = "rgba(0,0,0,0.45)";
+      g.fillRect(x + pad + tile * 0.08, y + tile * 0.76, s - tile * 0.16, tile * 0.07);
+      g.fillStyle = "#9fb3c8";
+      g.fillRect(x + pad + tile * 0.08, y + tile * 0.76, (s - tile * 0.16) * Math.max(0, Math.min(1, frac)), tile * 0.07);
+    } else badge(x + tile * 0.8, y + tile * 0.2, n.status);
+  }
+
+  function badge(cx: number, cy: number, status: string) {
+    const st = STATUS_BADGE[status] ?? STATUS_BADGE.idle!;
+    g.fillStyle = st.colour;
+    g.beginPath();
+    g.arc(cx, cy, tile * 0.15, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = "#14161a";
+    g.font = `700 ${tile * 0.2}px system-ui, sans-serif`;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText(st.symbol, cx, cy + 1);
   }
 
   function drawTower(n: FactoryNode, time: number) {
@@ -190,7 +222,10 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
     g.font = `700 ${tile * 0.3}px system-ui, sans-serif`;
     g.textAlign = "center";
     g.textBaseline = "middle";
-    g.fillText(t.name[0] ?? "T", c.x, c.y + 1);
+    g.fillText(t.name[0] ?? "T", c.x, c.y - tile * 0.06);
+    g.font = `600 ${tile * 0.18}px system-ui, sans-serif`;
+    g.fillStyle = empty ? "#ff8a7a" : "#cfc9bb";
+    g.fillText(String(Math.floor(magazineCount(n) + 1e-9)), c.x, c.y + tile * 0.16);
   }
 
   function drawEnemies(prev: GameState, cur: GameState, alpha: number) {
@@ -232,6 +267,38 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
     g.closePath();
   }
 
+  function drawEffects(effects: readonly Effect[], time: number) {
+    for (const e of effects) {
+      const age = (time - e.t) / EFFECT_LIFE[e.kind];
+      if (age < 0 || age >= 1) continue;
+      if (e.kind === "tracer") {
+        g.strokeStyle = `rgba(255, 224, 140, ${1 - age})`;
+        g.lineWidth = tile * 0.05;
+        g.beginPath();
+        g.moveTo(e.from.x * tile, e.from.y * tile);
+        g.lineTo(e.to.x * tile, e.to.y * tile);
+        g.stroke();
+      } else if (e.kind === "hit") {
+        g.fillStyle = `rgba(255, 245, 210, ${0.9 * (1 - age)})`;
+        g.beginPath();
+        g.arc(e.at.x * tile, e.at.y * tile, tile * (0.1 + 0.1 * age), 0, Math.PI * 2);
+        g.fill();
+      } else if (e.kind === "pop") {
+        g.strokeStyle = e.colour;
+        g.globalAlpha = 1 - age;
+        g.lineWidth = tile * 0.06;
+        g.beginPath();
+        g.arc(e.at.x * tile, e.at.y * tile, tile * e.r * (1 + age * 1.6), 0, Math.PI * 2);
+        g.stroke();
+        g.globalAlpha = 1;
+      } else if (e.kind === "coreHit") {
+        const core = ctx.path.points.at(-1)!;
+        g.fillStyle = `rgba(255, 70, 50, ${0.6 * (1 - age)})`;
+        g.fillRect((core.x - 0.5) * tile, (core.y - 0.5) * tile, tile, tile);
+      }
+    }
+  }
+
   function drawOverlay(o: Overlay) {
     if (o.tile) {
       g.strokeStyle = "#f2c14e";
@@ -270,13 +337,20 @@ export function createRenderer(canvas: HTMLCanvasElement, ctx: GameCtx, map: Gam
       const x = Math.floor(p.x), y = Math.floor(p.y);
       return x >= 0 && y >= 0 && x < map.width && y < map.rows.length ? { x, y } : undefined;
     },
-    draw(prev, cur, alpha, time, overlay) {
+    draw(prev, cur, alpha, time, overlay, effects = []) {
+      // a short shake when the core is hit
+      const hit = effects.find((e) => e.kind === "coreHit" && effectAlive(e, time));
+      const shake = hit ? tile * 0.08 * (1 - (time - hit.t) / EFFECT_LIFE.coreHit) : 0;
+      g.save();
       g.clearRect(0, 0, canvas.width, canvas.height);
+      if (shake) g.translate(Math.sin(time * 90) * shake, Math.cos(time * 77) * shake);
       drawMap();
       drawLinks(cur, time);
       for (const n of cur.factory.nodes) (n.towerId ? drawTower(n, time) : drawBuilding(n));
       drawEnemies(prev, cur, alpha);
+      drawEffects(effects, time);
       if (overlay) drawOverlay(overlay);
+      g.restore();
     },
   };
 }

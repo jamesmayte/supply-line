@@ -15,6 +15,15 @@
       #top { justify-content: space-between; flex-wrap: wrap; row-gap: 2px; }
       #top b { font-variant-numeric: tabular-nums; }
       #next { width: 100%; color: var(--dim); font-size: 12px; }
+      #help { flex: 0 0 auto; min-height: 32px; width: 32px; padding: 0; border-radius: 50%; background: #2c3038; font-size: 15px; }
+      #sheet .report { margin: 0 4px 10px; display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; font-size: 13px; font-variant-numeric: tabular-nums; }
+      #sheet .report .wide { grid-column: 1 / -1; margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: #23303a; color: #cfe3f0; }
+      #sheet .opt .best { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; background: var(--accent); color: #1b1b1b; font-weight: 700; font-size: 11px; }
+      #sheet .opt.card.recommended { outline: 2px solid var(--accent); }
+      #sheet .legend { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; margin: 0 4px 10px; font-size: 13px; }
+      #sheet .legend i { font-style: normal; display: inline-flex; width: 22px; height: 22px; border-radius: 50%; align-items: center; justify-content: center; color: #14161a; font-weight: 700; font-size: 12px; }
+      #sheet .legend .key { display: inline-flex; width: 22px; justify-content: center; font-weight: 700; }
+      #sheet .howto { margin: 0 4px 10px; padding-left: 18px; font-size: 14px; line-height: 1.45; }
       #stage { position: relative; width: 100%; max-width: 480px; display: flex; justify-content: center; }
       canvas { display: block; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
       #bottom { position: sticky; bottom: 0; flex-wrap: wrap; justify-content: center; }
@@ -59,6 +68,7 @@
       <span>Core <b id="core">100</b></span>
       <span>Ingots <b id="ingots">20</b></span>
       <span>Kills <b id="kills">0</b></span>
+      <button id="help" aria-label="How to play">?</button>
       <span id="next"></span>
     </div>
     <div id="stage">
@@ -77,7 +87,7 @@
         <button id="speed">1×</button>
       </div>
     </div>
-    <div id="sheet"><h3><span id="sheetTitle"></span><button class="close" id="sheetClose">Close</button></h3><div class="lines" id="sheetLines"></div><div class="problem" id="sheetProblem"></div><div class="opts" id="sheetOpts"></div></div>
+    <div id="sheet"><h3><span id="sheetTitle"></span><button class="close" id="sheetClose">Close</button></h3><div id="sheetExtra"></div><div class="lines" id="sheetLines"></div><div class="problem" id="sheetProblem"></div><div class="opts" id="sheetOpts"></div></div>
     <div id="toast"></div>
     <script type="module" src="./main.ts"></script>
   </body>

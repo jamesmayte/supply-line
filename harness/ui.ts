@@ -4,6 +4,7 @@ import { buildingOf, outputItem, towerOf, type FactoryNode } from "../core/facto
 import { accepts, applyFactoryCommand, occupiedTiles } from "../core/factoryBuild";
 import { spendable, type GameCtx, type GameInput, type GameState } from "../core/game";
 import { canPlaceBuilding, canPlaceTower, linkLength, routeLink, type TileXY } from "../core/placement";
+import type { Bottleneck, CardAdvice } from "../core/analysis";
 
 type Stack = { itemId: string; qty: number };
 
@@ -185,4 +186,63 @@ export function inspect(ctx: GameCtx, state: GameState, node: FactoryNode, firin
   }
   const problem = node.status === "working" && !tower ? undefined : upstreamProblem(ctx, state, node);
   return { title: nodeName(ctx, node), lines, problem };
+}
+
+/* ---------- wave report + card advice (Milestone A) ---------- */
+
+/** Counted by the harness over one wave. */
+export interface WaveStats {
+  kills: number;
+  leaked: number;
+  shots: number;
+  /** ammo items made by the factory during the wave */
+  ammoMade: number;
+  /** tower-ticks with enemies on the map, and how many of those the tower's magazine was empty */
+  towerTicks: number;
+  emptyTicks: number;
+}
+
+export interface WaveReport {
+  lines: InspectLine[];
+  /** the one thing to do next, in plain words */
+  advice: string;
+}
+
+const plural = (name: string) => (name.endsWith("s") ? name : `${name}s`);
+
+/** Turn a wave's numbers and the factory analysis into a short report with one piece of advice. */
+export function waveReport(ctx: GameCtx, stats: WaveStats, b: Bottleneck): WaveReport {
+  const emptyPct = stats.towerTicks ? Math.round((stats.emptyTicks / stats.towerTicks) * 100) : 0;
+  const lines: InspectLine[] = [
+    { label: "Kills", value: String(stats.kills), tone: "good" },
+    { label: "Got through", value: String(stats.leaked), tone: stats.leaked ? "bad" : "good" },
+    { label: "Bullets made / fired", value: `${Math.round(stats.ammoMade)} / ${stats.shots}` },
+    { label: "Gunners empty", value: `${emptyPct}% of the wave`, tone: emptyPct >= 25 ? "bad" : emptyPct >= 10 ? "warn" : "good" },
+    { label: "Ammo ceiling now", value: `${fmt(b.ammoRate)}/s` },
+  ];
+  let advice: string;
+  if (b.ammoRate < 1e-6) advice = "No ammo is reaching your towers: link an assembler (or a hub) to a Gunner.";
+  else if (stats.leaked === 0 && emptyPct < 10) {
+    const next = b.limiting.length
+      ? `${plural(ctx.factory.buildings.get(b.limiting[0]!.buildingId)?.name ?? "")} hold your ammo back most`
+      : b.cappedLinks.length
+        ? "a full link holds your ammo back"
+        : "another chain is the way to more ammo";
+    advice = `Clean wave: nothing got through. To get ahead, ${next}.`;
+  } else if (emptyPct < 10 && stats.leaked > 0)
+    advice = "Your Gunners rarely ran dry, so ammo isn't the problem: add a Gunner or place one where enemies spend longer in range.";
+  else if (b.limiting.length) {
+    const top = b.limiting[0]!;
+    const name = plural(ctx.factory.buildings.get(top.buildingId)?.name ?? top.buildingId);
+    advice = `Bottleneck: ${name}. Speeding them up 25% would raise ammo by ${Math.round(top.gainPct)}%.`;
+  } else if (b.cappedLinks.length) advice = "A link is carrying its maximum: add a second link or route through a hub.";
+  else advice = "Every stage of your chain is at its limit: build another chain for more ammo.";
+  return { lines, advice };
+}
+
+/** One line under each card: what it would do for this factory. */
+export function cardNote(a: CardAdvice): string {
+  if (a.kind === "grant") return "Build now: another chain, or more Gunners";
+  const g = Math.round(a.gainPct);
+  return g >= 1 ? `+${g}% ammo on your current setup (${fmt(a.baseline)} → ${fmt(a.projected)}/s)` : "No gain on your current setup: another stage limits it";
 }
