@@ -14,13 +14,19 @@ export type FactoryCommand =
   | { type: "placeTower"; towerId: string; x: number; y: number }
   | { type: "link"; from: number; to: number; tier?: number; itemId?: string }
   | { type: "unlink"; linkId: number }
-  | { type: "remove"; nodeId: number };
+  | { type: "remove"; nodeId: number }
+  /** raise a building one upgrade tier (cost is paid by the game layer) */
+  | { type: "upgrade"; nodeId: number }
+  /** move a building or tower; its links re-route, and any that can't are dropped */
+  | { type: "move"; nodeId: number; x: number; y: number };
 
 export interface CommandResult {
   state: FactoryState;
   error?: string;
   /** id of the node or link created */
   id?: number;
+  /** links removed as a side effect (a move that left them invalid) */
+  dropped?: number[];
 }
 
 export function occupiedTiles(state: FactoryState): Set<string> {
@@ -147,6 +153,54 @@ export function applyFactoryCommand(state: FactoryState, ctx: FactoryCtx, cmd: F
       if (!state.links.some((l) => l.id === cmd.linkId)) return err("unknown link");
       next.links = next.links.filter((l) => l.id !== cmd.linkId);
       return { state: next };
+    }
+
+    case "upgrade": {
+      const node = next.nodes.find((n) => n.id === cmd.nodeId);
+      if (!node) return err("unknown node");
+      if (node.towerId) return err("towers can't be upgraded yet");
+      const b = buildingOf(ctx, node);
+      const lvl = node.level ?? 1;
+      if (lvl - 1 >= b.upgrades.length) return err(`${b.name.toLowerCase()} is at its top tier`);
+      node.level = lvl + 1;
+      return { state: next };
+    }
+
+    case "move": {
+      const node = next.nodes.find((n) => n.id === cmd.nodeId);
+      if (!node) return err("unknown node");
+      if (node.x === cmd.x && node.y === cmd.y) return err("already there");
+      const occupied = occupiedTiles(state);
+      occupied.delete(tileKey(node.x, node.y));
+      const check = node.towerId
+        ? canPlaceTower(ctx.grid, cmd.x, cmd.y, occupied)
+        : canPlaceBuilding(ctx.grid, buildingOf(ctx, node), cmd.x, cmd.y, occupied);
+      if (!check.ok) return err(check.reason);
+      node.x = cmd.x;
+      node.y = cmd.y;
+      if (!node.towerId && buildingOf(ctx, node).kind === "extractor") {
+        const ore = tileAt(ctx.grid, cmd.x, cmd.y)?.oreId;
+        if (ore !== node.oreId) node.output = 0; // different ore: old buffer is meaningless
+        if (ore) node.oreId = ore;
+      }
+      // keep links that still route and still carry what both ends make/accept
+      const byId = new Map(next.nodes.map((n) => [n.id, n]));
+      const dropped: number[] = [];
+      next.links = next.links.filter((l) => {
+        if (l.from !== node.id && l.to !== node.id) return true;
+        const from = byId.get(l.from)!, to = byId.get(l.to)!;
+        const tier = ctx.tiers.get(l.tier)!;
+        const fromHub = !from.towerId && buildingOf(ctx, from).kind === "hub";
+        const carries = fromHub ? l.itemId : outputItem(ctx, from);
+        const route = routeLink(ctx.grid, from, to, tier);
+        if (route.ok && carries === l.itemId && accepts(ctx, to, l.itemId)) {
+          l.length = route.route.length - 1;
+          return true;
+        }
+        dropped.push(l.id);
+        return false;
+      });
+      return { state: next, ...(dropped.length ? { dropped } : {}) };
     }
 
     case "remove": {

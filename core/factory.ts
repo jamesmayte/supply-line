@@ -40,6 +40,8 @@ export interface FactoryNode {
   status: NodeStatus;
   /** cumulative items produced (or extracted) */
   produced: number;
+  /** in-place upgrade tier (spec §7.2); absent = 1 */
+  level?: number;
   /** towers only: which tower this node is (buildingId holds the same id) */
   towerId?: string;
   /** towers only: seconds until the next shot may fire */
@@ -65,12 +67,28 @@ export interface FactoryState {
   links: FactoryLink[];
   /** speed multipliers by building id from run effects (cards); absent = 1 */
   speedMult?: Record<string, number>;
+  /** run effect: links carry as if this many tiers higher (capped at the top tier); absent = 0 */
+  linkBonus?: number;
 }
 
 export const emptyFactory = (): FactoryState => ({ nextId: 1, nodes: [], links: [] });
 
-/** Effective speed of a building: content speed × any run multipliers. */
-export const speedOf = (state: FactoryState, b: Building): number => b.speed * (state.speedMult?.[b.id] ?? 1);
+/** Speed multiplier from a node's upgrade tier (tier 1 = 1). */
+export const levelMult = (b: Building, node?: FactoryNode): number => {
+  const lvl = node?.level ?? 1;
+  return lvl <= 1 ? 1 : (b.upgrades[lvl - 2]?.speed ?? 1);
+};
+
+/** Effective speed of a building: content speed × upgrade tier × any run multipliers. */
+export const speedOf = (state: FactoryState, b: Building, node?: FactoryNode): number =>
+  b.speed * levelMult(b, node) * (state.speedMult?.[b.id] ?? 1);
+
+/** Items per second a link can carry, including run bonuses (capped at the top tier). */
+export function linkCap(ctx: FactoryCtx, state: FactoryState, l: FactoryLink): number {
+  const top = Math.max(...ctx.tiers.keys());
+  const tier = Math.min(top, l.tier + (state.linkBonus ?? 0));
+  return ctx.tiers.get(tier)?.itemsPerSecond ?? 0;
+}
 
 /** Static lookups built once from content. */
 export interface FactoryCtx {
@@ -185,7 +203,7 @@ function stepProduction(ctx: FactoryCtx, state: FactoryState, dt: number): void 
     const outSpace = Math.max(0, b.bufferSize - n.output);
 
     if (n.oreId && b.extractRate) {
-      const max = b.extractRate * speedOf(state, b) * dt;
+      const max = b.extractRate * speedOf(state, b, n) * dt;
       const made = Math.min(max, outSpace);
       n.output += made;
       n.produced += made;
@@ -201,7 +219,7 @@ function stepProduction(ctx: FactoryCtx, state: FactoryState, dt: number): void 
       continue;
     }
     // fraction of one craft this tick, limited by time, inputs and output space
-    const maxCrafts = (dt * speedOf(state, b)) / recipe.time;
+    const maxCrafts = (dt * speedOf(state, b, n)) / recipe.time;
     const outQty = recipe.outputs[0]!.qty;
     const byOutput = outSpace / outQty;
     const byInput = Math.min(...recipe.inputs.map((s) => (n.inputs[s.itemId] ?? 0) / s.qty));
@@ -222,7 +240,7 @@ function stepTransport(ctx: FactoryCtx, state: FactoryState, dt: number): void {
   const byId = new Map(state.nodes.map((n) => [n.id, n]));
   const node = (id: number) => byId.get(id)!;
   const want = state.links.map((l) => {
-    const cap = (ctx.tiers.get(l.tier)?.itemsPerSecond ?? 0) * dt;
+    const cap = linkCap(ctx, state, l) * dt;
     return Math.min(cap, freeSpace(ctx, node(l.to), l.itemId));
   });
 

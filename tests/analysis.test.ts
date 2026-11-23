@@ -79,17 +79,39 @@ describe("bottleneck", () => {
 
 describe("card advice", () => {
   it("projects each speed card's gain and recommends the best", () => {
-    const advice = adviseCards(smelterBound(), ctx, ["better_drills", "hot_smelters", "scrap_haul"], OPTS);
+    const advice = adviseCards(smelterBound(), ctx, ["rich_seams", "hot_smelters", "scrap_haul"], OPTS);
     const byId = Object.fromEntries(advice.map((a) => [a.cardId, a]));
     expect(byId.hot_smelters).toMatchObject({ kind: "ammo" });
     if (byId.hot_smelters!.kind === "ammo") expect(byId.hot_smelters!.gainPct).toBeCloseTo(25, 0);
-    if (byId.better_drills!.kind === "ammo") expect(byId.better_drills!.gainPct).toBeCloseTo(0, 0);
+    if (byId.rich_seams!.kind === "ammo") expect(byId.rich_seams!.gainPct).toBeCloseTo(0, 0);
     expect(byId.scrap_haul).toEqual({ cardId: "scrap_haul", kind: "grant", items: [{ itemId: "iron_ingot", qty: 8 }] });
     expect(bestCard(advice)).toBe("hot_smelters");
   });
 
   it("when no speed card helps, recommends ingots (build another chain); with no ingot card, nothing", () => {
-    expect(bestCard(adviseCards(chain(), ctx, ["better_drills", "hot_smelters", "scrap_haul"], OPTS))).toBe("scrap_haul");
-    expect(bestCard(adviseCards(chain(), ctx, ["better_drills", "hot_smelters", "quick_assembly"], OPTS))).toBeUndefined();
+    expect(bestCard(adviseCards(chain(), ctx, ["rich_seams", "hot_smelters", "scrap_haul"], OPTS))).toBe("scrap_haul");
+    expect(bestCard(adviseCards(chain(), ctx, ["rich_seams", "hot_smelters", "quick_assembly"], OPTS))).toBeUndefined();
+  });
+});
+
+describe("advice for the M1.6 cards", () => {
+  it("'Wider links' shows a gain when a link is the limit", () => {
+    const s = structuredClone(chain(1));
+    s.factory.speedMult = { extractor: 2, smelter: 2, assembler: 2 }; // factory could make 4/s; tier-1 link carries 2
+    const [a] = adviseCards(s, ctx, ["wider_links"], OPTS);
+    expect(a!.kind).toBe("ammo");
+    if (a!.kind === "ammo") expect(a!.gainPct).toBeCloseTo(100, 0);
+  });
+
+  it("'Free upgrade' names the building to upgrade, or nothing on a balanced chain", () => {
+    const [bal] = adviseCards(chain(2), ctx, ["free_upgrade"], OPTS);
+    expect(bal).toMatchObject({ kind: "upgrade", gainPct: 0 });
+    expect(bal!.kind === "upgrade" && bal!.nodeId).toBeUndefined();
+    const s = structuredClone(chain(2));
+    s.factory.speedMult = { extractor: 2, assembler: 2 }; // smelter is the only bottleneck
+    const [one] = adviseCards(s, ctx, ["free_upgrade"], OPTS);
+    expect(one).toMatchObject({ kind: "upgrade", nodeId: 4 }); // the smelter
+    if (one!.kind === "upgrade") expect(one!.gainPct).toBeCloseTo(100, 0);
+    expect(bestCard(adviseCards(s, ctx, ["free_upgrade", "hot_smelters"], OPTS))).toBe("free_upgrade");
   });
 });

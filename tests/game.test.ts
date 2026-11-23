@@ -276,12 +276,12 @@ describe("run loop (M1.3): cards, early start, stars", () => {
   });
 
   it("a grant card adds to the stockpile; a speed card speeds those buildings up", () => {
-    const s = { ...afterWave1(), cardOffer: ["scrap_haul", "better_drills", "hot_smelters"] };
+    const s = { ...afterWave1(), cardOffer: ["scrap_haul", "rich_seams", "hot_smelters"] };
     const haul = step(s, [{ type: "pickCard", cardId: "scrap_haul" }], DT, ctx);
     expect(haul.stock.iron_ingot).toBe(s.stock.iron_ingot! + 8);
-    const drills = step(s, [{ type: "pickCard", cardId: "better_drills" }, { type: "place", buildingId: "extractor", x: 7, y: 7 }], DT, ctx);
+    const drills = step(s, [{ type: "pickCard", cardId: "rich_seams" }, { type: "place", buildingId: "extractor", x: 7, y: 7 }], DT, ctx);
     const later = run(drills, 2);
-    expect(later.factory.nodes[0]!.produced).toBeCloseTo((2 + DT) * 1.25, 6);
+    expect(later.factory.nodes[0]!.produced).toBeCloseTo((2 + DT) * 1.5, 6);
   });
 
   it("starting early pays a bonus that shrinks to 0 over the window; none for wave 1", () => {
@@ -306,4 +306,78 @@ describe("run loop (M1.3): cards, early start, stars", () => {
     expect(starsFor({ ...base, phase: "won", coreHp: 10 }, ctx, 100)).toBe(1);
     expect(starsFor({ ...base, phase: "lost", coreHp: 0 }, ctx, 100)).toBe(0);
   });
+});
+
+describe("room to grow (M1.6): upgrades, moves, new cards", () => {
+  const ingotsFor = (id: string, tier: number) => biome1.buildings.find((b) => b.id === id)!.upgrades[tier - 2]!.cost[0]!.qty;
+  const setup = () =>
+    step(newGame(biome1, MAP, 1), [
+      { type: "place", buildingId: "extractor", x: 7, y: 7 }, // 1
+      { type: "place", buildingId: "smelter", x: 6, y: 7 }, // 2
+      { type: "link", from: 1, to: 2 }, // 3
+    ], DT, ctx);
+
+  it("upgrading an extractor doubles its output and costs the content price", () => {
+    const s = setup();
+    const up = step(s, [{ type: "upgrade", nodeId: 1 }], DT, ctx);
+    expect(up.errors).toEqual([]);
+    expect(up.factory.nodes[0]!.level).toBe(2);
+    expect(up.stock.iron_ingot).toBe(s.stock.iron_ingot! - ingotsFor("extractor", 2));
+    const free = { ...s, factory: { ...s.factory, links: [] } }; // no outflow, so we only measure extraction
+    const a = run(free, 2), b = run(applyCommands(free, [{ type: "upgrade", nodeId: 1 }], ctx), 2);
+    const made = (x: GameState) => x.factory.nodes[0]!.produced - free.factory.nodes[0]!.produced;
+    expect(made(b)).toBeCloseTo(made(a) * 2, 6);
+  });
+
+  it("stops at the top tier; towers can't be upgraded", () => {
+    let s: GameState = { ...setup(), stock: { iron_ingot: 100 } };
+    s = step(s, [{ type: "upgrade", nodeId: 1 }, { type: "upgrade", nodeId: 1 }], DT, ctx);
+    expect(s.factory.nodes[0]!.level).toBe(3);
+    expect(step(s, [{ type: "upgrade", nodeId: 1 }], DT, ctx).errors[0]).toMatch(/top tier/);
+    const t = step(s, [{ type: "placeTower", towerId: "gunner", x: 6, y: 8 }], DT, ctx);
+    expect(step(t, [{ type: "upgrade", nodeId: t.factory.nodes.at(-1)!.id }], DT, ctx).errors[0]).toMatch(/towers/);
+  });
+
+  it("a free-upgrade token is used before paying; the refund includes upgrades", () => {
+    const s = { ...setup(), upgradeTokens: 1 };
+    const up = step(s, [{ type: "upgrade", nodeId: 2 }], DT, ctx);
+    expect(up.upgradeTokens).toBe(0);
+    expect(up.stock.iron_ingot).toBe(s.stock.iron_ingot);
+    const removed = step(up, [{ type: "remove", nodeId: 2 }], DT, ctx);
+    expect(removed.stock.iron_ingot).toBe(s.stock.iron_ingot! + 2 + ingotsFor("smelter", 2)); // build cost + upgrade, full refund in a break
+  });
+
+  it("moving keeps links that still route and drops those that can't", () => {
+    const s = setup();
+    const near = step(s, [{ type: "move", nodeId: 2, x: 6, y: 6 }], DT, ctx);
+    expect(near.errors).toEqual([]);
+    expect(near.factory.nodes.find((n) => n.id === 2)).toMatchObject({ x: 6, y: 6 });
+    expect(near.factory.links).toHaveLength(1);
+    expect(near.factory.links[0]!.length).toBe(2);
+    const far = step(s, [{ type: "move", nodeId: 2, x: 0, y: 8 }], DT, ctx); // across the path: no bridge route
+    expect(far.errors).toEqual([]);
+    expect(far.factory.links).toEqual([]);
+    expect(far.dropped).toEqual([3]);
+  });
+
+  it("can't move onto bad tiles or during a wave", () => {
+    const s = setup();
+    expect(step(s, [{ type: "move", nodeId: 2, x: 4, y: 2 }], DT, ctx).errors[0]).toMatch(/path/);
+    expect(step(s, [{ type: "move", nodeId: 2, x: 7, y: 7 }], DT, ctx).errors[0]).toMatch(/occupied/);
+    expect(step(s, [{ type: "move", nodeId: 1, x: 6, y: 5 }], DT, ctx).errors[0]).toMatch(/ore/);
+    const inWave = step(s, [{ type: "startWave" }], DT, ctx);
+    expect(step(inWave, [{ type: "move", nodeId: 2, x: 6, y: 6 }], DT, ctx).errors[0]).toMatch(/during a wave/);
+  });
+
+  it("'Wider links' raises every link's capacity by a tier", () => {
+    const s = { ...afterWave1Offer(["wider_links", "scrap_haul", "overclock"]) };
+    const picked = step(s, [{ type: "pickCard", cardId: "wider_links" }], DT, ctx);
+    expect(picked.factory.linkBonus).toBe(1);
+  });
+
+  function afterWave1Offer(offer: string[]): GameState {
+    let s = step(newGame(biome1, MAP, 1), [{ type: "startWave" }], DT, ctx);
+    s = untilBuild(s);
+    return { ...s, cardOffer: offer };
+  }
 });

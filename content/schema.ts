@@ -36,6 +36,11 @@ export const BuildingSchema = z.object({
   /** generator only */
   fuel: z.object({ itemId: id, secondsPerItem: z.number().positive() }).optional(),
   powerRadius: z.number().int().positive().optional(),
+  /**
+   * In-place upgrades (spec §7.2): upgrades[0] is tier 2, upgrades[1] tier 3 …
+   * `speed` is the total speed multiplier at that tier (relative to tier 1); `cost` is paid for that step.
+   */
+  upgrades: z.array(z.object({ speed: z.number().positive(), cost: z.array(StackSchema) })).default([]),
 });
 
 /* ---------- recipes ---------- */
@@ -149,6 +154,10 @@ export const CardEffectSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("grant"), items: z.array(StackSchema).min(1) }),
   /** multiply the speed of these buildings (stacks multiplicatively) */
   z.object({ type: z.literal("speed"), buildingIds: z.array(id).min(1), multiplier: z.number().positive() }),
+  /** every link carries as if it were `delta` tiers higher (capped at the top tier) */
+  z.object({ type: z.literal("linkTier"), delta: z.number().int().positive() }),
+  /** free building upgrades to use any time */
+  z.object({ type: z.literal("upgradeToken"), count: z.number().int().positive() }),
 ]);
 
 export const CardSchema = z.object({
@@ -265,6 +274,11 @@ export function crossCheck(c: Content): string[] {
     if (b.kind === "extractor" && !b.extractRate) errs.push(`building ${b.id}: extractor needs extractRate`);
     if (b.kind === "generator" && (!b.fuel || !b.powerRadius)) errs.push(`building ${b.id}: generator needs fuel + powerRadius`);
     if (b.fuel) needItem(`building ${b.id} fuel`, b.fuel.itemId);
+    b.upgrades.forEach((u, i) => {
+      u.cost.forEach((s) => needItem(`building ${b.id} upgrade ${i + 2}`, s.itemId));
+      const prev = i === 0 ? 1 : b.upgrades[i - 1]!.speed;
+      if (u.speed <= prev) errs.push(`building ${b.id}: upgrade ${i + 2} speed must exceed tier ${i + 1}`);
+    });
   }
   for (const r of c.recipes) {
     if (!buildings.has(r.buildingId)) errs.push(`recipe ${r.id}: unknown building '${r.buildingId}'`);
@@ -284,8 +298,9 @@ export function crossCheck(c: Content): string[] {
     r.requires.forEach((q) => needResearch(`research ${r.id} requires`, q));
   }
   for (const card of c.cards) {
-    if (card.effect.type === "grant") card.effect.items.forEach((s) => needItem(`card ${card.id}`, s.itemId));
-    else card.effect.buildingIds.forEach((b) => { if (!buildings.has(b)) errs.push(`card ${card.id}: unknown building '${b}'`); });
+    const e = card.effect;
+    if (e.type === "grant") e.items.forEach((s) => needItem(`card ${card.id}`, s.itemId));
+    else if (e.type === "speed") e.buildingIds.forEach((b) => { if (!buildings.has(b)) errs.push(`card ${card.id}: unknown building '${b}'`); });
   }
   if (c.cards.length && c.cards.length < c.rules.cardsOffered) errs.push(`rules: offers ${c.rules.cardsOffered} cards but only ${c.cards.length} exist`);
   needItem("rules earlyStart", c.rules.earlyStart.maxBonus.itemId);

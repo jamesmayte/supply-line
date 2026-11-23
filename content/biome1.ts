@@ -17,11 +17,15 @@ const raw = {
   ],
 
   buildings: [
-    { id: "extractor", name: "Extractor", kind: "extractor", inputPorts: 0, bufferSize: 10, needsPower: false, buildCost: [], extractRate: 1 },
-    { id: "smelter", name: "Smelter", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 2 }] },
+    { id: "extractor", name: "Extractor", kind: "extractor", inputPorts: 0, bufferSize: 10, needsPower: false, buildCost: [], extractRate: 1,
+      upgrades: [{ speed: 2, cost: [{ itemId: "iron_ingot", qty: 4 }] }, { speed: 3, cost: [{ itemId: "iron_ingot", qty: 8 }] }] },
+    { id: "smelter", name: "Smelter", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 2 }],
+      upgrades: [{ speed: 2, cost: [{ itemId: "iron_ingot", qty: 5 }] }, { speed: 3, cost: [{ itemId: "iron_ingot", qty: 10 }] }] },
     { id: "press", name: "Press", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 4 }] },
-    { id: "coal_mill", name: "Coal mill", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 2 }] },
-    { id: "assembler", name: "Assembler", kind: "assembler", inputPorts: 3, bufferSize: 20, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 4 }] },
+    { id: "coal_mill", name: "Coal mill", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 2 }],
+      upgrades: [{ speed: 2, cost: [{ itemId: "iron_ingot", qty: 4 }] }] },
+    { id: "assembler", name: "Assembler", kind: "assembler", inputPorts: 3, bufferSize: 20, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 4 }],
+      upgrades: [{ speed: 2, cost: [{ itemId: "iron_ingot", qty: 6 }] }, { speed: 3, cost: [{ itemId: "iron_ingot", qty: 12 }] }] },
     { id: "hub", name: "Hub", kind: "hub", inputPorts: 3, outputPorts: 3, bufferSize: 50, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 2 }] },
     { id: "generator", name: "Generator", kind: "generator", inputPorts: 1, bufferSize: 10, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 3 }], fuel: { itemId: "coal", secondsPerItem: 4 }, powerRadius: 3 },
     { id: "lab", name: "Lab", kind: "lab", inputPorts: 1, bufferSize: 20, needsPower: true, buildCost: [{ itemId: "plate", qty: 6 }] },
@@ -70,12 +74,15 @@ const raw = {
     { id: "gen_efficiency", name: "Generator efficiency", branch: "power", tier: 1, cost: [{ itemId: "red_pack", qty: 10 }], time: 20 },
   ],
 
-  // Placeholder reward cards (M1.3): factory-side only, nothing buffs towers directly.
+  // Reward cards (M1.3, reworked M1.6 so every card can matter): factory-side only, nothing buffs towers directly.
   cards: [
     { id: "scrap_haul", name: "Scrap haul", text: "+8 iron ingots", effect: { type: "grant", items: [{ itemId: "iron_ingot", qty: 8 }] } },
-    { id: "better_drills", name: "Better drills", text: "Extractors +25% speed", effect: { type: "speed", buildingIds: ["extractor"], multiplier: 1.25 } },
+    { id: "overclock", name: "Overclock", text: "Every extractor, smelter and assembler +15% speed", effect: { type: "speed", buildingIds: ["extractor", "smelter", "assembler", "coal_mill", "press"], multiplier: 1.15 } },
+    { id: "wider_links", name: "Wider links", text: "Every link carries one tier more", effect: { type: "linkTier", delta: 1 } },
+    { id: "rich_seams", name: "Rich seams", text: "Extractors +50% speed", effect: { type: "speed", buildingIds: ["extractor"], multiplier: 1.5 } },
     { id: "hot_smelters", name: "Hot smelters", text: "Smelters +25% speed", effect: { type: "speed", buildingIds: ["smelter"], multiplier: 1.25 } },
     { id: "quick_assembly", name: "Quick assembly", text: "Assemblers +25% speed", effect: { type: "speed", buildingIds: ["assembler"], multiplier: 1.25 } },
+    { id: "free_upgrade", name: "Free upgrade", text: "Upgrade any building one tier, free", effect: { type: "upgradeToken", count: 1 } },
   ],
 
   rules: {

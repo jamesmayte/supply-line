@@ -7,7 +7,7 @@
  * happened to fire, which also depends on enemies being in range.
  */
 import type { Content } from "../content/schema";
-import { stepFactory, type FactoryCtx, type FactoryState } from "./factory";
+import { linkCap, stepFactory, type FactoryCtx, type FactoryState } from "./factory";
 import type { GameCtx, GameState } from "./game";
 
 type Card = Content["cards"][number];
@@ -51,7 +51,32 @@ const pct = (base: number, next: number) => (base > 1e-9 ? ((next - base) / base
 
 export type CardAdvice =
   | { cardId: string; kind: "ammo"; baseline: number; projected: number; gainPct: number }
-  | { cardId: string; kind: "grant"; items: { itemId: string; qty: number }[] };
+  | { cardId: string; kind: "grant"; items: { itemId: string; qty: number }[] }
+  /** a free upgrade: the single building whose upgrade would help most (if any helps) */
+  | { cardId: string; kind: "upgrade"; nodeId?: number; baseline: number; projected: number; gainPct: number };
+
+/** A copy of the factory with one node a tier higher. */
+function withUpgrade(factory: FactoryState, nodeId: number): FactoryState {
+  const f = structuredClone(factory);
+  const n = f.nodes.find((x) => x.id === nodeId)!;
+  n.level = (n.level ?? 1) + 1;
+  return f;
+}
+
+/** Which one building to upgrade for the most ammo (production buildings with a tier left). */
+export function bestUpgrade(factory: FactoryState, ctx: FactoryCtx, opts?: AmmoRateOptions): { nodeId?: number; baseline: number; projected: number; gainPct: number } {
+  const baseline = ammoRate(factory, ctx, opts);
+  let best = { nodeId: undefined as number | undefined, baseline, projected: baseline, gainPct: 0 };
+  for (const n of factory.nodes) {
+    if (n.towerId) continue;
+    const b = ctx.buildings.get(n.buildingId);
+    if (!b || (n.level ?? 1) - 1 >= b.upgrades.length) continue;
+    const projected = ammoRate(withUpgrade(factory, n.id), ctx, opts);
+    const gainPct = pct(baseline, projected);
+    if (gainPct >= 1 && gainPct > best.gainPct + 1e-9) best = { nodeId: n.id, baseline, projected, gainPct };
+  }
+  return best;
+}
 
 /** What each offered card would do for the current factory. */
 export function adviseCards(state: GameState, ctx: GameCtx, cardIds: readonly string[], opts?: AmmoRateOptions): CardAdvice[] {
@@ -61,7 +86,12 @@ export function adviseCards(state: GameState, ctx: GameCtx, cardIds: readonly st
     if (!card) throw new Error(`unknown card '${id}'`);
     const e = card.effect;
     if (e.type === "grant") return { cardId: id, kind: "grant", items: e.items.map((i) => ({ ...i })) };
-    const projected = ammoRate(withSpeed(state.factory, e.buildingIds, e.multiplier), ctx.factory, opts);
+    if (e.type === "upgradeToken") return { cardId: id, kind: "upgrade", ...bestUpgrade(state.factory, ctx.factory, opts) };
+    const changed =
+      e.type === "speed"
+        ? withSpeed(state.factory, e.buildingIds, e.multiplier)
+        : { ...structuredClone(state.factory), linkBonus: (state.factory.linkBonus ?? 0) + e.delta };
+    const projected = ammoRate(changed, ctx.factory, opts);
     return { cardId: id, kind: "ammo", baseline, projected, gainPct: pct(baseline, projected) };
   });
 }
@@ -72,7 +102,8 @@ export function adviseCards(state: GameState, ctx: GameCtx, cardIds: readonly st
  */
 export function bestCard(advice: readonly CardAdvice[]): string | undefined {
   let best: { id: string; gain: number } | undefined;
-  for (const a of advice) if (a.kind === "ammo" && a.gainPct >= 1 && (!best || a.gainPct > best.gain)) best = { id: a.cardId, gain: a.gainPct };
+  for (const a of advice)
+    if ((a.kind === "ammo" || a.kind === "upgrade") && a.gainPct >= 1 && (!best || a.gainPct > best.gain)) best = { id: a.cardId, gain: a.gainPct };
   return best?.id ?? advice.find((a) => a.kind === "grant")?.cardId;
 }
 
@@ -105,7 +136,7 @@ export function findBottleneck(factory: FactoryState, ctx: FactoryCtx, opts?: Am
   }
   const topTier = Math.max(...ctx.tiers.keys());
   const cappedLinks = s.links
-    .filter((l) => l.tier < topTier && l.flow >= (ctx.tiers.get(l.tier)?.itemsPerSecond ?? Infinity) - 1e-6)
+    .filter((l) => l.tier + (s.linkBonus ?? 0) < topTier && l.flow >= linkCap(ctx, s, l) - 1e-6)
     .filter((l) => {
       const f = structuredClone(factory);
       f.links.find((x) => x.id === l.id)!.tier = topTier;
