@@ -10,13 +10,17 @@ describe("biome 1 content", () => {
     expect(biome1.maps.length).toBeGreaterThan(0);
   });
 
-  it("matches the spec's starter chain: 1 ore/s -> 0.5 ingot/s -> 2 bullets/s", () => {
-    expect(building("extractor").extractRate).toBe(1);
-    expect(recipeRate(recipe("smelt_iron"), building("smelter"))).toBe(0.5);
-    expect(recipeRate(recipe("make_bullets"), building("assembler"))).toBe(2);
-    // smelter consumes exactly what one extractor makes
-    const r = recipe("smelt_iron");
-    expect(r.inputs[0]!.qty / r.time).toBe(1);
+  it("starter chain delivers 1 ore/s -> 0.5 ingot/s -> 2 bullets/s, limited by the extractor (M1.6)", () => {
+    const ore = building("extractor").extractRate!;
+    expect(ore).toBe(1);
+    const smelt = recipe("smelt_iron"), bullets = recipe("make_bullets");
+    const ingot = ore / smelt.inputs[0]!.qty; // what one extractor's ore makes
+    expect(ingot).toBe(0.5);
+    expect(ingot * bullets.outputs[0]!.qty).toBe(2);
+    // every later stage has headroom, so speeding up the bottleneck always helps (no perfect balance)
+    expect(smelt.inputs[0]!.qty / smelt.time).toBeGreaterThan(ore);
+    expect(bullets.inputs[0]!.qty / bullets.time).toBeGreaterThan(ingot);
+    expect(biome1.linkTiers.find((t) => t.tier === 1)!.itemsPerSecond).toBeGreaterThan(ingot * bullets.outputs[0]!.qty);
   });
 
   it("a starter Gunner is underfed by one chain (the core tension)", () => {

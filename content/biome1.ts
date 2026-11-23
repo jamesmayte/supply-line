@@ -31,19 +31,22 @@ const raw = {
     { id: "lab", name: "Lab", kind: "lab", inputPorts: 1, bufferSize: 20, needsPower: true, buildCost: [{ itemId: "plate", qty: 6 }] },
   ],
 
-  // output/s = qty / time (speed 1)
+  // output/s = qty / time (speed 1).
+  // M1.6: stages are deliberately NOT balanced. A starter chain (1 extractor → smelter → assembler) is limited
+  // by its extractor (1 ore/s → 0.5 ingot/s → 2 bullets/s); each stage after it has headroom, so speeding up the
+  // current bottleneck always helps and reveals the next one. (Perfect balance made single-stage boosts useless.)
   recipes: [
-    { id: "smelt_iron", buildingId: "smelter", inputs: [{ itemId: "iron_ore", qty: 2 }], outputs: [{ itemId: "iron_ingot", qty: 1 }], time: 2 }, // 0.5/s
+    { id: "smelt_iron", buildingId: "smelter", inputs: [{ itemId: "iron_ore", qty: 2 }], outputs: [{ itemId: "iron_ingot", qty: 1 }], time: 1.6 }, // up to 0.625/s (1.25 ore/s in)
     { id: "press_plate", buildingId: "press", inputs: [{ itemId: "iron_ingot", qty: 1 }], outputs: [{ itemId: "plate", qty: 2 }], time: 4, unlockedBy: "press_plates" }, // 0.5/s
     { id: "mill_powder", buildingId: "coal_mill", inputs: [{ itemId: "coal", qty: 1 }], outputs: [{ itemId: "powder", qty: 2 }], time: 2 }, // 1/s
-    { id: "make_bullets", buildingId: "assembler", inputs: [{ itemId: "iron_ingot", qty: 1 }], outputs: [{ itemId: "bullets", qty: 4 }], time: 2 }, // 2/s
+    { id: "make_bullets", buildingId: "assembler", inputs: [{ itemId: "iron_ingot", qty: 1 }], outputs: [{ itemId: "bullets", qty: 4 }], time: 1.5 }, // up to 2.67/s (0.67 ingot/s in)
     { id: "make_shells", buildingId: "assembler", inputs: [{ itemId: "plate", qty: 1 }, { itemId: "powder", qty: 2 }], outputs: [{ itemId: "shells", qty: 2 }], time: 3, unlockedBy: "cannon_shells" },
     { id: "make_red_pack", buildingId: "assembler", inputs: [{ itemId: "iron_ingot", qty: 1 }, { itemId: "coal", qty: 1 }], outputs: [{ itemId: "red_pack", qty: 1 }], time: 5 },
   ],
 
   linkTiers: [
-    { tier: 1, itemsPerSecond: 2, maxLength: 6 },
-    { tier: 2, itemsPerSecond: 4, maxLength: 9 },
+    { tier: 1, itemsPerSecond: 3, maxLength: 6 }, // > one chain's 2/s, so a starter chain isn't link-bound
+    { tier: 2, itemsPerSecond: 5, maxLength: 9 },
     { tier: 3, itemsPerSecond: 8, maxLength: 9 },
   ],
 

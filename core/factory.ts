@@ -18,6 +18,9 @@ type Tower = Content["towers"][number];
 /** float tolerance for "full", "empty" and "running flat out" */
 export const EPS = 1e-9;
 
+/** Below this utilisation an input-limited building reports "starved" (display classification, not a rate). */
+export const STARVED_BELOW = 0.6;
+
 export type NodeStatus = "working" | "starved" | "backlogged" | "unpowered" | "idle";
 
 export interface FactoryNode {
@@ -228,7 +231,8 @@ function stepProduction(ctx: FactoryCtx, state: FactoryState, dt: number): void 
     n.output += outQty * crafts;
     n.produced += outQty * crafts;
     n.utilisation = crafts / maxCrafts;
-    n.status = n.utilisation >= 1 - EPS ? "working" : byOutput < byInput ? "backlogged" : "starved";
+    // "starved" only when it's mostly waiting: a stage running at 80% behind a slower one is healthy
+    n.status = n.utilisation >= 1 - EPS ? "working" : byOutput < byInput ? "backlogged" : n.utilisation >= STARVED_BELOW ? "working" : "starved";
   }
 }
 

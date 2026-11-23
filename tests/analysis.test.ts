@@ -25,6 +25,13 @@ function chain(gunTier = 1): GameState {
   if (s.errors.length) throw new Error(s.errors.join("; "));
   return s;
 }
+/** Extractor sped up to exactly the smelter's limit and the assembler slowed to match: every stage at its limit. */
+function balanced(): GameState {
+  const s = structuredClone(chain(2));
+  const smelterOre = 2 / 1.6; // smelt_iron: 2 ore per 1.6 s
+  s.factory.speedMult = { extractor: smelterOre, assembler: (smelterOre / 2) / (1 / 1.5) };
+  return s;
+}
 /** Extractors, assemblers and the Gunner link (tier 2) have headroom, so the smelter is the only bottleneck. */
 function smelterBound(): GameState {
   const s = structuredClone(chain(2));
@@ -53,10 +60,17 @@ describe("ammo rate", () => {
 });
 
 describe("bottleneck", () => {
-  it("a balanced chain has no single limiting stage, and its full link isn't blamed", () => {
+  it("the starter chain is limited by its extractor (+25% extractor speed → +25% ammo)", () => {
     const b = findBottleneck(chain().factory, ctx.factory, OPTS);
+    expect(b.limiting.map((x) => x.buildingId)).toEqual(["extractor"]);
+    expect(b.limiting[0]!.gainPct).toBeCloseTo(25, 0);
+    expect(b.cappedLinks).toEqual([]);
+  });
+
+  it("a perfectly balanced chain has no single limiting stage, and a full link isn't blamed", () => {
+    const b = findBottleneck(balanced().factory, ctx.factory, OPTS);
     expect(b.limiting).toEqual([]);
-    expect(b.cappedLinks).toEqual([]); // the Gunner link runs at its 2/s cap, but so does everything else
+    expect(b.cappedLinks).toEqual([]);
   });
 
   it("finds the one stage holding the chain back", () => {
@@ -89,29 +103,33 @@ describe("card advice", () => {
   });
 
   it("when no speed card helps, recommends ingots (build another chain); with no ingot card, nothing", () => {
-    expect(bestCard(adviseCards(chain(), ctx, ["rich_seams", "hot_smelters", "scrap_haul"], OPTS))).toBe("scrap_haul");
-    expect(bestCard(adviseCards(chain(), ctx, ["rich_seams", "hot_smelters", "quick_assembly"], OPTS))).toBeUndefined();
+    expect(bestCard(adviseCards(balanced(), ctx, ["rich_seams", "hot_smelters", "scrap_haul"], OPTS))).toBe("scrap_haul");
+    expect(bestCard(adviseCards(balanced(), ctx, ["rich_seams", "hot_smelters", "quick_assembly"], OPTS))).toBeUndefined();
+    // the plain starter chain is extractor-bound, so Rich seams helps there
+    expect(bestCard(adviseCards(chain(), ctx, ["rich_seams", "hot_smelters", "scrap_haul"], OPTS))).toBe("rich_seams");
   });
 });
 
 describe("advice for the M1.6 cards", () => {
   it("'Wider links' shows a gain when a link is the limit", () => {
     const s = structuredClone(chain(1));
-    s.factory.speedMult = { extractor: 2, smelter: 2, assembler: 2 }; // factory could make 4/s; tier-1 link carries 2
+    s.factory.speedMult = { extractor: 2, smelter: 2, assembler: 2 }; // factory could make 4/s; a tier-1 link carries less
+    const t1 = biome1.linkTiers[0]!.itemsPerSecond, t2 = biome1.linkTiers[1]!.itemsPerSecond;
     const [a] = adviseCards(s, ctx, ["wider_links"], OPTS);
     expect(a!.kind).toBe("ammo");
-    if (a!.kind === "ammo") expect(a!.gainPct).toBeCloseTo(100, 0);
+    if (a!.kind === "ammo") expect(a!.gainPct).toBeCloseTo(((Math.min(4, t2) - t1) / t1) * 100, 0);
   });
 
   it("'Free upgrade' names the building to upgrade, or nothing on a balanced chain", () => {
-    const [bal] = adviseCards(chain(2), ctx, ["free_upgrade"], OPTS);
+    const [bal] = adviseCards(balanced(), ctx, ["free_upgrade"], OPTS);
     expect(bal).toMatchObject({ kind: "upgrade", gainPct: 0 });
     expect(bal!.kind === "upgrade" && bal!.nodeId).toBeUndefined();
     const s = structuredClone(chain(2));
     s.factory.speedMult = { extractor: 2, assembler: 2 }; // smelter is the only bottleneck
     const [one] = adviseCards(s, ctx, ["free_upgrade"], OPTS);
     expect(one).toMatchObject({ kind: "upgrade", nodeId: 4 }); // the smelter
-    if (one!.kind === "upgrade") expect(one!.gainPct).toBeCloseTo(100, 0);
+    // tier-2 smelter takes 2.5 ore/s; the doubled extractor gives 2, so ammo goes 2.5 → 4 bullets/s
+    if (one!.kind === "upgrade") expect(one!.gainPct).toBeCloseTo(60, 0);
     expect(bestCard(adviseCards(s, ctx, ["free_upgrade", "hot_smelters"], OPTS))).toBe("free_upgrade");
   });
 });
