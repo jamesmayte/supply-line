@@ -75,6 +75,18 @@ later waves get hard, and coming back with meta upgrades makes them passable.
   mini-bosses at 5 and 10, boss at 15 (spec §2). Tune in content only.
 - Meta tech tree (spec §7.3) is what makes a failed map passable later; it stays in Phase 3.
 
+### M1.5 — Readability and feel ✅ (added after James's first 15-wave playtest)
+- Shot tracers, hit flashes, death pops, core-hit shake (cosmetic, derived from state).
+- One status badge per building (✓ ■ ✕ ⚡ ·) instead of border colour + bar; Gunner shows rounds left.
+- "?" help: how to play + legend; opens on first visit.
+- Between-wave report: kills, leaks, bullets made/fired, % of the wave Gunners were empty, ammo ceiling,
+  the bottleneck in plain words. Each card shows its projected ammo gain on the current factory; best one badged.
+
+### M1.6 — Room to grow (proposal, next)
+- Move buildings (free in a break). Upgrade buildings in place (spec §7.2) so you build up, not out.
+- Cards you can feel: e.g. whole-chain boosts; inspect shows active card effects.
+- Why: James ran out of map space and single-stage speed cards did nothing on balanced chains.
+
 ### M1.4 — Research (minimal)
 - Lab building, red science pack recipe, 4–6 research nodes from content.
 
