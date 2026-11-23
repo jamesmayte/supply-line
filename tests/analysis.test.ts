@@ -53,8 +53,10 @@ describe("ammo rate", () => {
 });
 
 describe("bottleneck", () => {
-  it("a balanced chain has no single limiting stage (every stage is at its limit)", () => {
-    expect(findBottleneck(chain().factory, ctx.factory, OPTS).limiting).toEqual([]);
+  it("a balanced chain has no single limiting stage, and its full link isn't blamed", () => {
+    const b = findBottleneck(chain().factory, ctx.factory, OPTS);
+    expect(b.limiting).toEqual([]);
+    expect(b.cappedLinks).toEqual([]); // the Gunner link runs at its 2/s cap, but so does everything else
   });
 
   it("finds the one stage holding the chain back", () => {
@@ -86,7 +88,8 @@ describe("card advice", () => {
     expect(bestCard(advice)).toBe("hot_smelters");
   });
 
-  it("recommends nothing when no speed card helps (balanced chain)", () => {
+  it("when no speed card helps, recommends ingots (build another chain); with no ingot card, nothing", () => {
+    expect(bestCard(adviseCards(chain(), ctx, ["better_drills", "hot_smelters", "scrap_haul"], OPTS))).toBe("scrap_haul");
     expect(bestCard(adviseCards(chain(), ctx, ["better_drills", "hot_smelters", "quick_assembly"], OPTS))).toBeUndefined();
   });
 });

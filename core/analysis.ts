@@ -66,11 +66,14 @@ export function adviseCards(state: GameState, ctx: GameCtx, cardIds: readonly st
   });
 }
 
-/** The speed card with the biggest ammo gain (≥ 1%), if any. */
+/**
+ * The card to recommend: the speed card with the biggest ammo gain (≥ 1%); if no speed card helps,
+ * a grant card (building another chain is then the real fix); otherwise none.
+ */
 export function bestCard(advice: readonly CardAdvice[]): string | undefined {
   let best: { id: string; gain: number } | undefined;
   for (const a of advice) if (a.kind === "ammo" && a.gainPct >= 1 && (!best || a.gainPct > best.gain)) best = { id: a.cardId, gain: a.gainPct };
-  return best?.id;
+  return best?.id ?? advice.find((a) => a.kind === "grant")?.cardId;
 }
 
 export interface Bottleneck {
@@ -78,7 +81,7 @@ export interface Bottleneck {
   ammoRate: number;
   /** building types ranked by how much +25% speed would raise ammo rate (only those that help ≥ 1%) */
   limiting: { buildingId: string; gainPct: number }[];
-  /** links running at their tier cap */
+  /** links at their tier cap where a higher tier would raise ammo rate (≥ 1%) */
   cappedLinks: number[];
 }
 
@@ -100,6 +103,14 @@ export function findBottleneck(factory: FactoryState, ctx: FactoryCtx, opts?: Am
     s = stepFactory(s, ctx, dt);
     for (const n of s.nodes) if (n.towerId) n.inputs = {};
   }
-  const cappedLinks = s.links.filter((l) => l.flow >= (ctx.tiers.get(l.tier)?.itemsPerSecond ?? Infinity) - 1e-6).map((l) => l.id);
+  const topTier = Math.max(...ctx.tiers.keys());
+  const cappedLinks = s.links
+    .filter((l) => l.tier < topTier && l.flow >= (ctx.tiers.get(l.tier)?.itemsPerSecond ?? Infinity) - 1e-6)
+    .filter((l) => {
+      const f = structuredClone(factory);
+      f.links.find((x) => x.id === l.id)!.tier = topTier;
+      return pct(base, ammoRate(f, ctx, opts)) >= 1;
+    })
+    .map((l) => l.id);
   return { ammoRate: base, limiting, cappedLinks };
 }
