@@ -139,7 +139,7 @@ describe("inspect sheet", () => {
     expect(info.lines.map((l) => l.label)).toEqual(expect.arrayContaining(["Magazine", "Stated fire rate", "Firing (last 5 s)", "Ammo arriving"]));
     expect(info.problem).toBeUndefined();
     const smelter = inspect(ctx, s, s.factory.nodes.find((n) => n.id === sm)!);
-    expect(smelter.lines.find((l) => l.label === "Utilisation")?.value).toBe("100%");
+    expect(smelter.lines.find((l) => l.label === "Utilisation")?.value).toBe("80%"); // behind a 1 ore/s extractor
   });
 });
 
@@ -149,7 +149,7 @@ describe("wave report and card notes", () => {
 
   it("names the bottleneck building and its gain", () => {
     const r = waveReport(ctx, stats(), { ammoRate: 2, limiting: [{ buildingId: "smelter", gainPct: 25 }], cappedLinks: [] });
-    expect(r.advice).toBe("Bottleneck: Smelters. Speeding them up 25% would raise ammo by 25%.");
+    expect(r.advice).toBe("Bottleneck: Smelters. Upgrade one (tap it), or speeding them up 25% would raise ammo by 25%.");
     expect(r.lines.find((l) => l.label === "Gunners empty")).toMatchObject({ value: "40% of the wave", tone: "bad" });
   });
 
@@ -174,5 +174,24 @@ describe("wave report and card notes", () => {
     expect(cardNote({ cardId: "hot_smelters", kind: "ammo", baseline: 2, projected: 2.5, gainPct: 25 })).toBe("+25% ammo on your current setup (2 → 2.5/s)");
     expect(cardNote({ cardId: "better_drills", kind: "ammo", baseline: 2, projected: 2, gainPct: 0 })).toMatch(/No gain/);
     expect(cardNote({ cardId: "scrap_haul", kind: "grant", items: [{ itemId: "iron_ingot", qty: 8 }] })).toMatch(/^Build now/);
+  });
+});
+
+describe("M1.6 sheet details", () => {
+  it("the inspect sheet shows link slots and tier", () => {
+    const s = apply(fresh(), [
+      { type: "place", buildingId: "extractor", x: 7, y: 7 },
+      { type: "place", buildingId: "smelter", x: 6, y: 7 },
+      { type: "link", from: 1, to: 2 },
+    ]);
+    const sm = inspect(ctx, s, s.factory.nodes.find((n) => n.id === 2)!);
+    expect(sm.lines.find((l) => l.label === "Link slots used")).toMatchObject({ value: "in 1/1 · out 0/1", tone: "warn" });
+    expect(sm.lines.find((l) => l.label === "Tier")?.value).toBe("1 / 3");
+  });
+
+  it("a free-upgrade card names the building to upgrade", () => {
+    const s = apply(fresh(), [{ type: "place", buildingId: "smelter", x: 6, y: 7 }]);
+    expect(cardNote({ cardId: "free_upgrade", kind: "upgrade", nodeId: 1, baseline: 2, projected: 4, gainPct: 100 }, ctx, s)).toBe("Best use: upgrade Smelter → +100% ammo (2 → 4/s)");
+    expect(cardNote({ cardId: "free_upgrade", kind: "upgrade", baseline: 2, projected: 2, gainPct: 0 }, ctx, s)).toMatch(/Keep it for later/);
   });
 });

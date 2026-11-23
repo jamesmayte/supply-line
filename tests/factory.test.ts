@@ -59,22 +59,21 @@ describe("balanced starter chain: 1 ore/s → 0.5 ingot/s → 2 bullets/s", () =
   const rate = (id: number) => (node(end, id).produced - node(warm, id).produced) / 30;
 
   it("hits the content rates (no hard-coded numbers)", () => {
-    const expected = {
-      ore: building("extractor").extractRate!,
-      ingot: recipeRate(recipe("smelt_iron"), building("smelter")),
-      bullets: recipeRate(recipe("make_bullets"), building("assembler")),
-    };
+    // the extractor limits the chain; later stages pass on what they get
+    const ore = building("extractor").extractRate!;
+    const ingot = ore / recipe("smelt_iron").inputs[0]!.qty;
+    const expected = { ore, ingot, bullets: ingot * recipe("make_bullets").outputs[0]!.qty };
     expect(expected).toEqual({ ore: 1, ingot: 0.5, bullets: 2 });
     expect(rate(ext)).toBeCloseTo(expected.ore, 6);
     expect(rate(smelter)).toBeCloseTo(expected.ingot, 6);
     expect(rate(asm)).toBeCloseTo(expected.bullets, 6);
   });
 
-  it("every building in the chain runs flat out", () => {
-    for (const id of [ext, smelter, asm]) {
-      expect(node(end, id).status, `node ${id}`).toBe("working");
-      expect(node(end, id).utilisation).toBeCloseTo(1, 6);
-    }
+  it("the extractor runs flat out; later stages have headroom but count as working", () => {
+    expect(node(end, ext).utilisation).toBeCloseTo(1, 6);
+    expect(node(end, smelter).utilisation).toBeCloseTo(0.5 / recipeRate(recipe("smelt_iron"), building("smelter")), 6);
+    expect(node(end, asm).utilisation).toBeCloseTo(2 / recipeRate(recipe("make_bullets"), building("assembler")), 6);
+    for (const id of [ext, smelter, asm]) expect(node(end, id).status, `node ${id}`).toBe("working");
     expect(node(end, gen).burning).toBe(true);
   });
 
@@ -119,10 +118,10 @@ describe("bottleneck: one smelter split across two assemblers", () => {
   const warm = run(linked, 30, both);
   const end = run(warm, 30, both);
 
-  it("downstream assemblers are starved at 50%", () => {
+  it("downstream assemblers are starved, each getting half the ingots", () => {
     for (const id of [a1, a2]) {
       expect(node(end, id).status).toBe("starved");
-      expect(node(end, id).utilisation).toBeCloseTo(0.5, 6);
+      expect(node(end, id).utilisation).toBeCloseTo(1 / recipeRate(recipe("make_bullets"), building("assembler")), 6);
       expect((node(end, id).produced - node(warm, id).produced) / 30).toBeCloseTo(1, 6);
     }
   });
@@ -155,8 +154,8 @@ describe("link throughput cap", () => {
     state,
   ).state;
 
-  it("3 ore/s into a tier-1 link only gets its cap through; the rest piles up", () => {
-    const s = run(linked, 10);
+  it("more ore than a tier-1 link carries: only its cap gets through; the rest piles up", () => {
+    const s = run({ ...linked, speedMult: { extractor: 2 } }, 10); // 3 extractors × 2 = 6 ore/s
     const capped = s.links.find((l) => l.from === h1)!;
     expect(capped.flow).toBeCloseTo(tier1.itemsPerSecond, 6);
     expect(node(s, h1).inputs.iron_ore!).toBeGreaterThan(5);

@@ -17,29 +17,36 @@ const raw = {
   ],
 
   buildings: [
-    { id: "extractor", name: "Extractor", kind: "extractor", inputPorts: 0, bufferSize: 10, needsPower: false, buildCost: [], extractRate: 1 },
-    { id: "smelter", name: "Smelter", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 2 }] },
+    { id: "extractor", name: "Extractor", kind: "extractor", inputPorts: 0, bufferSize: 10, needsPower: false, buildCost: [], extractRate: 1,
+      upgrades: [{ speed: 2, cost: [{ itemId: "iron_ingot", qty: 4 }] }, { speed: 3, cost: [{ itemId: "iron_ingot", qty: 8 }] }] },
+    { id: "smelter", name: "Smelter", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 2 }],
+      upgrades: [{ speed: 2, cost: [{ itemId: "iron_ingot", qty: 5 }] }, { speed: 3, cost: [{ itemId: "iron_ingot", qty: 10 }] }] },
     { id: "press", name: "Press", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 4 }] },
-    { id: "coal_mill", name: "Coal mill", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 2 }] },
-    { id: "assembler", name: "Assembler", kind: "assembler", inputPorts: 3, bufferSize: 20, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 4 }] },
+    { id: "coal_mill", name: "Coal mill", kind: "processor", inputPorts: 1, bufferSize: 10, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 2 }],
+      upgrades: [{ speed: 2, cost: [{ itemId: "iron_ingot", qty: 4 }] }] },
+    { id: "assembler", name: "Assembler", kind: "assembler", inputPorts: 3, bufferSize: 20, needsPower: true, buildCost: [{ itemId: "iron_ingot", qty: 4 }],
+      upgrades: [{ speed: 2, cost: [{ itemId: "iron_ingot", qty: 6 }] }, { speed: 3, cost: [{ itemId: "iron_ingot", qty: 12 }] }] },
     { id: "hub", name: "Hub", kind: "hub", inputPorts: 3, outputPorts: 3, bufferSize: 50, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 2 }] },
     { id: "generator", name: "Generator", kind: "generator", inputPorts: 1, bufferSize: 10, needsPower: false, buildCost: [{ itemId: "iron_ingot", qty: 3 }], fuel: { itemId: "coal", secondsPerItem: 4 }, powerRadius: 3 },
     { id: "lab", name: "Lab", kind: "lab", inputPorts: 1, bufferSize: 20, needsPower: true, buildCost: [{ itemId: "plate", qty: 6 }] },
   ],
 
-  // output/s = qty / time (speed 1)
+  // output/s = qty / time (speed 1).
+  // M1.6: stages are deliberately NOT balanced. A starter chain (1 extractor → smelter → assembler) is limited
+  // by its extractor (1 ore/s → 0.5 ingot/s → 2 bullets/s); each stage after it has headroom, so speeding up the
+  // current bottleneck always helps and reveals the next one. (Perfect balance made single-stage boosts useless.)
   recipes: [
-    { id: "smelt_iron", buildingId: "smelter", inputs: [{ itemId: "iron_ore", qty: 2 }], outputs: [{ itemId: "iron_ingot", qty: 1 }], time: 2 }, // 0.5/s
+    { id: "smelt_iron", buildingId: "smelter", inputs: [{ itemId: "iron_ore", qty: 2 }], outputs: [{ itemId: "iron_ingot", qty: 1 }], time: 1.6 }, // up to 0.625/s (1.25 ore/s in)
     { id: "press_plate", buildingId: "press", inputs: [{ itemId: "iron_ingot", qty: 1 }], outputs: [{ itemId: "plate", qty: 2 }], time: 4, unlockedBy: "press_plates" }, // 0.5/s
     { id: "mill_powder", buildingId: "coal_mill", inputs: [{ itemId: "coal", qty: 1 }], outputs: [{ itemId: "powder", qty: 2 }], time: 2 }, // 1/s
-    { id: "make_bullets", buildingId: "assembler", inputs: [{ itemId: "iron_ingot", qty: 1 }], outputs: [{ itemId: "bullets", qty: 4 }], time: 2 }, // 2/s
+    { id: "make_bullets", buildingId: "assembler", inputs: [{ itemId: "iron_ingot", qty: 1 }], outputs: [{ itemId: "bullets", qty: 4 }], time: 1.5 }, // up to 2.67/s (0.67 ingot/s in)
     { id: "make_shells", buildingId: "assembler", inputs: [{ itemId: "plate", qty: 1 }, { itemId: "powder", qty: 2 }], outputs: [{ itemId: "shells", qty: 2 }], time: 3, unlockedBy: "cannon_shells" },
     { id: "make_red_pack", buildingId: "assembler", inputs: [{ itemId: "iron_ingot", qty: 1 }, { itemId: "coal", qty: 1 }], outputs: [{ itemId: "red_pack", qty: 1 }], time: 5 },
   ],
 
   linkTiers: [
-    { tier: 1, itemsPerSecond: 2, maxLength: 6 },
-    { tier: 2, itemsPerSecond: 4, maxLength: 9 },
+    { tier: 1, itemsPerSecond: 3, maxLength: 6 }, // > one chain's 2/s, so a starter chain isn't link-bound
+    { tier: 2, itemsPerSecond: 5, maxLength: 9 },
     { tier: 3, itemsPerSecond: 8, maxLength: 9 },
   ],
 
@@ -70,12 +77,15 @@ const raw = {
     { id: "gen_efficiency", name: "Generator efficiency", branch: "power", tier: 1, cost: [{ itemId: "red_pack", qty: 10 }], time: 20 },
   ],
 
-  // Placeholder reward cards (M1.3): factory-side only, nothing buffs towers directly.
+  // Reward cards (M1.3, reworked M1.6 so every card can matter): factory-side only, nothing buffs towers directly.
   cards: [
     { id: "scrap_haul", name: "Scrap haul", text: "+8 iron ingots", effect: { type: "grant", items: [{ itemId: "iron_ingot", qty: 8 }] } },
-    { id: "better_drills", name: "Better drills", text: "Extractors +25% speed", effect: { type: "speed", buildingIds: ["extractor"], multiplier: 1.25 } },
+    { id: "overclock", name: "Overclock", text: "Every extractor, smelter and assembler +15% speed", effect: { type: "speed", buildingIds: ["extractor", "smelter", "assembler", "coal_mill", "press"], multiplier: 1.15 } },
+    { id: "wider_links", name: "Wider links", text: "Every link carries one tier more", effect: { type: "linkTier", delta: 1 } },
+    { id: "rich_seams", name: "Rich seams", text: "Extractors +50% speed", effect: { type: "speed", buildingIds: ["extractor"], multiplier: 1.5 } },
     { id: "hot_smelters", name: "Hot smelters", text: "Smelters +25% speed", effect: { type: "speed", buildingIds: ["smelter"], multiplier: 1.25 } },
     { id: "quick_assembly", name: "Quick assembly", text: "Assemblers +25% speed", effect: { type: "speed", buildingIds: ["assembler"], multiplier: 1.25 } },
+    { id: "free_upgrade", name: "Free upgrade", text: "Upgrade any building one tier, free", effect: { type: "upgradeToken", count: 1 } },
   ],
 
   rules: {

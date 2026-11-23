@@ -71,6 +71,10 @@ export interface GameState {
   cardOffer: string[] | null;
   /** cards picked so far, in order */
   cards: string[];
+  /** free upgrades from cards, used before paying */
+  upgradeTokens: number;
+  /** links dropped by the last tick's moves (for the UI) */
+  dropped: number[];
 }
 
 export type GameInput = FactoryCommand | { type: "startWave" } | { type: "pickCard"; cardId: string };
@@ -121,6 +125,8 @@ export function newGame(content: Content, mapId: string, seed: number): GameStat
     breakTime: 0,
     cardOffer: null,
     cards: [],
+    upgradeTokens: 0,
+    dropped: [],
   };
 }
 
@@ -158,10 +164,21 @@ export function pickTarget(ctx: GameCtx, enemies: readonly Enemy[], node: Factor
 /* ---------- economy ---------- */
 
 /** What a command costs to carry out (empty if free). */
-export function costOf(ctx: GameCtx, input: GameInput): readonly Stack[] {
+export function costOf(ctx: GameCtx, input: GameInput, state?: GameState): readonly Stack[] {
   if (input.type === "place") return ctx.factory.buildings.get(input.buildingId)?.buildCost ?? [];
   if (input.type === "placeTower") return ctx.factory.towers.get(input.towerId)?.buildCost ?? [];
+  if (input.type === "upgrade" && state) {
+    const node = state.factory.nodes.find((n) => n.id === input.nodeId);
+    return node ? upgradeCost(ctx, node) : [];
+  }
   return [];
+}
+
+/** Cost of a node's next upgrade (empty if none left or it's a tower). */
+export function upgradeCost(ctx: GameCtx, node: FactoryNode): readonly Stack[] {
+  if (node.towerId) return [];
+  const b = ctx.factory.buildings.get(node.buildingId);
+  return b?.upgrades[(node.level ?? 1) - 1]?.cost ?? [];
 }
 
 const hubsOf = (state: GameState, ctx: GameCtx): FactoryNode[] =>
@@ -222,17 +239,23 @@ function drawOffer(state: GameState, ctx: GameCtx): string[] {
 function applyCard(state: GameState, card: Card): void {
   const e = card.effect;
   if (e.type === "grant") for (const it of e.items) state.stock[it.itemId] = (state.stock[it.itemId] ?? 0) + it.qty;
-  else {
+  else if (e.type === "speed") {
     const mult = (state.factory.speedMult ??= {});
     for (const b of e.buildingIds) mult[b] = (mult[b] ?? 1) * e.multiplier;
-  }
+  } else if (e.type === "linkTier") state.factory.linkBonus = (state.factory.linkBonus ?? 0) + e.delta;
+  else state.upgradeTokens += e.count;
 }
 
 /** What removing a node gives back right now (fraction of its build cost by phase). */
 export function refundOf(state: GameState, ctx: GameCtx, node: FactoryNode): Stack[] {
-  const cost = node.towerId ? ctx.factory.towers.get(node.towerId)?.buildCost : ctx.factory.buildings.get(node.buildingId)?.buildCost;
+  const b = node.towerId ? undefined : ctx.factory.buildings.get(node.buildingId);
+  const base = node.towerId ? ctx.factory.towers.get(node.towerId)?.buildCost ?? [] : b?.buildCost ?? [];
+  // upgrades count as spent too (free ones included: simplest rule, and tokens are rare)
+  const upgrades = b ? b.upgrades.slice(0, (node.level ?? 1) - 1).flatMap((u) => u.cost) : [];
   const frac = state.phase === "wave" ? ctx.rules.refund.wave : ctx.rules.refund.buildBreak;
-  return (cost ?? []).map((c) => ({ itemId: c.itemId, qty: c.qty * frac })).filter((c) => c.qty > 0);
+  const total = new Map<string, number>();
+  for (const c of [...base, ...upgrades]) total.set(c.itemId, (total.get(c.itemId) ?? 0) + c.qty);
+  return [...total].map(([itemId, qty]) => ({ itemId, qty: qty * frac })).filter((c) => c.qty > 0);
 }
 
 /** Stars for a finished run: 0 if lost, else by core HP fraction left (content rules). */
@@ -269,13 +292,22 @@ function applyInput(state: GameState, ctx: GameCtx, input: GameInput): string | 
     state.factory = r.state;
     return undefined;
   }
+  if (input.type === "move" && state.phase === "wave") return "can't move during a wave";
+  if (input.type === "upgrade" && state.upgradeTokens > 0) {
+    const r = applyFactoryCommand(state.factory, ctx.factory, input);
+    if (r.error) return r.error;
+    state.factory = r.state;
+    state.upgradeTokens--;
+    return undefined;
+  }
+  const cost = costOf(ctx, input, state); // before the command: an upgrade's cost depends on the current tier
   const r = applyFactoryCommand(state.factory, ctx.factory, input);
   if (r.error) return r.error;
-  const cost = costOf(ctx, input);
   const short = shortfall(state, ctx, cost); // checked against hubs before the new node exists
   if (short) return short;
   state.factory = r.state;
   pay(state, ctx, cost);
+  if (r.dropped) state.dropped.push(...r.dropped);
   return undefined;
 }
 
@@ -350,6 +382,7 @@ function settle(state: GameState, ctx: GameCtx): void {
 
 function applyAll(next: GameState, ctx: GameCtx, input: readonly GameInput[]): void {
   next.errors = [];
+  next.dropped = [];
   for (const cmd of input) {
     const err = applyInput(next, ctx, cmd);
     if (err) next.errors.push(`${cmd.type}: ${err}`);

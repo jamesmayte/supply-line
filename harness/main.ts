@@ -5,7 +5,7 @@ import { biome1 } from "../content/biome1";
 import { RUN_A, RUN_B, type Script } from "../content/scenarios";
 import { adviseCards, bestCard, findBottleneck } from "../core/analysis";
 import { towerOf, type FactoryNode } from "../core/factory";
-import { applyCommands, earlyStartBonus, makeGameCtx, newGame, pickTarget, refundOf, spendable, starsFor, step, type GameInput, type GameState } from "../core/game";
+import { applyCommands, earlyStartBonus, makeGameCtx, newGame, pickTarget, refundOf, spendable, starsFor, step, upgradeCost, type GameInput, type GameState } from "../core/game";
 import { positionAt, tileCentre } from "../core/path";
 import type { TileXY } from "../core/placement";
 import { createRenderer, effectAlive, ENEMY_STYLE_OF, STATUS_BADGE, type Effect, type Overlay } from "./render";
@@ -62,6 +62,7 @@ function reset(next: Mode) {
   shotHistory = [];
   effects = [];
   waveStats = lastWave = null;
+  moving = null;
   closeSheet();
   syncButtons();
 }
@@ -71,7 +72,7 @@ function tick() {
   queued = [];
   prev = cur;
   cur = step(cur, input, DT, ctx);
-  if (cur.errors.length) toast(cur.errors.map((e) => e.replace(/^\w+: /, "")).join(" · "));
+  reportOutcome(cur);
   shotHistory.push({ tick: cur.tick, shots: new Map(cur.factory.nodes.filter((n) => n.towerId).map((n) => [n.id, n.shots ?? 0])) });
   deriveEffects(prev, cur);
   trackWave(prev, cur);
@@ -140,7 +141,7 @@ function send(input: GameInput) {
     return;
   }
   cur = prev = applyCommands(cur, [input], ctx);
-  if (cur.errors.length) toast(cur.errors.map((e) => e.replace(/^\w+: /, "")).join(" · "));
+  reportOutcome(cur);
 }
 
 /* ---------- toast ---------- */
@@ -148,11 +149,17 @@ const toastEl = $("toast");
 let toastTimer = 0;
 /** Swap content ids (iron_ingot) for display names (iron ingot) in sim messages. */
 const humanize = (text: string) => text.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b|\b[a-z]+\b/g, (w) => ctx.factory.items.get(w)?.name.toLowerCase() ?? w);
-function toast(text: string) {
+function toast(text: string, ms = 2200) {
   toastEl.textContent = humanize(text);
   toastEl.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), 2200);
+  toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), ms);
+}
+
+/** After any commands: errors, or links a move had to drop. */
+function reportOutcome(s: GameState) {
+  if (s.errors.length) toast(s.errors.map((e) => e.replace(/^\w+: /, "")).join(" · "));
+  else if (s.dropped.length) toast(`Moved. ${s.dropped.length} link${s.dropped.length > 1 ? "s" : ""} couldn't re-route and ${s.dropped.length > 1 ? "were" : "was"} removed`, 3500);
 }
 
 /* ---------- bottom sheet ---------- */
@@ -217,9 +224,49 @@ function closeSheet() {
 
 /** Tap a building: live stats, plus the first problem upstream in plain words. */
 function openInspect(n: FactoryNode) {
-  openSheet("", [{ label: "Remove / unlink…", note: "or hold the building", run: () => openNodeMenu(n) }], n, "inspect");
+  const items: SheetItem[] = [];
+  const b = n.towerId ? undefined : ctx.factory.buildings.get(n.buildingId);
+  const lvl = n.level ?? 1;
+  const next = b?.upgrades[lvl - 1];
+  if (b && next) {
+    const cost = upgradeCost(ctx, n);
+    const free = cur.upgradeTokens > 0;
+    const affordable = free || cost.every((c) => spendable(cur, ctx, c.itemId) >= c.qty - 1e-9);
+    items.push({
+      label: `Upgrade to tier ${lvl + 1}`,
+      note: `×${fmtX(next.speed)} speed · ${free ? `free (${cur.upgradeTokens} token${cur.upgradeTokens > 1 ? "s" : ""})` : costLabel(ctx, cost)}`,
+      disabled: !affordable,
+      run: () => send({ type: "upgrade", nodeId: n.id }),
+    });
+  }
+  items.push({
+    label: "Move",
+    note: cur.phase === "wave" ? "only between waves" : "then tap the new spot",
+    disabled: cur.phase === "wave",
+    run: () => startMove(n),
+  });
+  items.push({ label: "Remove / unlink…", note: "or hold the building", run: () => openNodeMenu(n) });
+  openSheet("", items, n, "inspect");
   inspecting = n.id;
   refreshInspect();
+}
+
+const fmtX = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0$/, ""));
+
+/* ---------- move: pick a building, then tap where it goes ---------- */
+let moving: FactoryNode | null = null;
+function startMove(n: FactoryNode) {
+  moving = n;
+  overlay = { tile: n };
+  toast(`Moving ${nodeName(ctx, n)}: tap an empty tile (tap it again to cancel)`, 4000);
+}
+function finishMove(t: TileXY) {
+  const n = moving!;
+  moving = null;
+  overlay = {};
+  if (t.x === n.x && t.y === n.y) return toast("Move cancelled");
+  toast(`Moved ${nodeName(ctx, n)}`); // replaced by the reason if the sim refuses it
+  send({ type: "move", nodeId: n.id, x: t.x, y: t.y });
 }
 
 function refreshInspect() {
@@ -252,7 +299,7 @@ function openCardPick() {
     offer.map((id) => {
       const c = ctx.cards.get(id)!;
       const a = advice.find((x) => x.cardId === id)!;
-      return { label: c.name, note: c.text, note2: cardNote(a), best: id === best ? "Best for you" : undefined, card: true, run: () => send({ type: "pickCard", cardId: id }) };
+      return { label: c.name, note: c.text, note2: cardNote(a, ctx, cur), best: id === best ? "Best for you" : undefined, card: true, run: () => send({ type: "pickCard", cardId: id }) };
     }),
     undefined,
     "cards",
@@ -418,6 +465,10 @@ function endGesture(e: PointerEvent, cancelled: boolean) {
     return;
   }
   // a tap
+  if (moving) {
+    finishMove(g.start);
+    return;
+  }
   if (g.node) {
     openInspect(g.node);
     return;
