@@ -234,7 +234,7 @@ export function waveReport(ctx: GameCtx, stats: WaveStats, b: Bottleneck): WaveR
   if (b.ammoRate < 1e-6) advice = "No ammo is reaching your towers: link an assembler (or a hub) to a Gunner.";
   else if (stats.leaked === 0 && emptyPct < 10) {
     const next = b.limiting.length
-      ? `${plural(ctx.factory.buildings.get(b.limiting[0]!.buildingId)?.name ?? "")} hold your ammo back most`
+      ? `${plural(ctx.factory.buildings.get(b.limiting[0]!.buildingId)?.name ?? "").toLowerCase()} hold your ammo back most`
       : b.cappedLinks.length
         ? "a full link holds your ammo back"
         : "another chain is the way to more ammo";

@@ -263,10 +263,52 @@ https://jamesmayte.github.io/supply-line/ (after merge). The help sheet opens on
    and see the report name it and a card show a gain.
 4. Is it easier to tell what's going on? Does it feel more alive?
 
+## Second playtest (James, after M1.5): **won** all 15 waves (65/100 core, 2 stars, 189 kills)
+
+- Liked the UI additions: keep improving clarity as we go.
+- Wants to see used/free link slots on each building.
+- Never once got a "speed up" recommendation, only ingots and "add more chains".
+- Asked for clearer doubled-up links (side by side), smarter routing, and a visible upgrade tier.
+
+Root cause of the last point: the content was **perfectly balanced** (1 ore/s = smelter's 1 ore/s,
+0.5 ingot/s = assembler's 0.5, 2 bullets/s = tier-1 link's 2/s). Every limit was the same number, so no
+single boost, not even +15% everywhere (the link capped it), could help. Fixed in M1.6 by staggering rates.
+
+- **M1.6 done** (room to grow):
+  - **Staggered rates** (content): smelt 2 ore → 1 ingot in 1.6 s (takes up to 1.25 ore/s), bullets in 1.5 s
+    (takes up to 0.67 ingot/s), tier-1 links 3/s, tier-2 5/s. A starter chain still makes 2 bullets/s but is
+    limited by its **extractor**; boost that and the smelter becomes the limit, and so on. Wave balance unchanged
+    (interlock numbers identical). A building is only "starved" (✕) below 60% busy; the sheet shows the exact %.
+  - **Upgrade in place** (inspect → Upgrade): extractor, smelter, assembler to tier 2 (×2 speed) and tier 3 (×3);
+    coal mill to tier 2. Costs in content (e.g. smelter 5 then 10 ingots). Refund includes upgrades.
+    Tier 2 = **bronze** border + one chevron, tier 3 = **silver** + two.
+  - **Move** (inspect → Move, then tap a tile): between waves only. Links re-route; any that can't are
+    dropped with a toast. Extractors must stay on ore.
+  - **Cards reworked:** Scrap haul (+8 ingots), **Overclock** (all production +15%), **Wider links** (every link
+    one tier more), **Rich seams** (extractors +50%), Hot smelters, Quick assembly, **Free upgrade** (token).
+    Advice covers all of them: e.g. "Best use: upgrade Smelter → +60% ammo".
+  - **Port notches:** inputs along the top edge, outputs along the bottom; filled = used, hollow = free.
+    The sheet shows "Link slots used: in 1/1 · out 0/1" (amber when full).
+  - **Links:** doubled-up links draw in **side-by-side lanes**; each link picks the L-bend that crosses fewer
+    buildings and other links (`harness/links.ts`, cosmetic; the sim only stores tier and length).
+  - Tests: upgrades, moves, new cards, advice, lanes/routing, staggered chain. Total 136 green.
+  - Checked on an emulated iPhone 13: upgraded a smelter to tier 3, moved a Gunner (link re-routed),
+    lanes from the hub, wave 1 → Overclock "+15% ammo (4 → 4.6/s)" badged Best for you,
+    report "extractors hold your ammo back most". No page errors.
+
+### What to try on the phone (M1.6)
+
+https://jamesmayte.github.io/supply-line/ (after merge).
+1. **Demo: 1 chain**: tap the extractor next to the smelter → see "Link slots used" and **Upgrade to tier 2**.
+2. Upgrade it, then tap the smelter: it's now the busy one. Watch the cards after the next wave.
+3. Hold-free: tap a Gunner → **Move** → tap a new tile.
+4. Look at the hub's links in **Demo: 2 chains**: they run side by side now.
+5. Does speeding things up feel worth it now? Is the layout easier to manage?
+
 ## Next
 
-**M1.6 — Room to grow** (proposal in `docs/build-plan.md`): move buildings, upgrade in place, cards you can feel.
-Then M1.4 research, then re-run the Phase 1 check.
+**M1.4 — Research (minimal)**: Lab, red science pack, 4–6 research nodes (Cannon + shells, link tiers, …).
+Then re-run the Phase 1 check.
 
 ## Decisions so far
 
@@ -311,6 +353,15 @@ Then M1.4 research, then re-run the Phase 1 check.
 
 - Biome 1 enemy HP doubled (walker 80, swarmer 24, armoured 240). The M0.5 sanity table predates this.
 - The interlock scenario uses 3 Gunners so that ammo, not tower count, is the binding constraint.
+
+## Decisions in M1.6 (easy to change, flag if wrong)
+
+- Stage rates staggered (see above). Starter-chain output (2 bullets/s) and the wave curve are unchanged.
+- "Starved" threshold 60% busy (`STARVED_BELOW` in `core/factory.ts`: a display classification, not a rate).
+- Upgrades: ×2 / ×3 speed; towers can't be upgraded (would make towers stronger without the factory).
+- Move is free but only between waves; links that can't re-route are dropped, not refused.
+- Wider links stacks (capped at the top tier). Free-upgrade tokens are used before paying.
+- Port notches count slots (inputs top, outputs bottom); links can still enter from any side.
 
 ## Decisions in M1.5 (easy to change, flag if wrong)
 

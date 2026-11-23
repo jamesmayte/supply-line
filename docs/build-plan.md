@@ -82,10 +82,12 @@ later waves get hard, and coming back with meta upgrades makes them passable.
 - Between-wave report: kills, leaks, bullets made/fired, % of the wave Gunners were empty, ammo ceiling,
   the bottleneck in plain words. Each card shows its projected ammo gain on the current factory; best one badged.
 
-### M1.6 — Room to grow (proposal, next)
-- Move buildings (free in a break). Upgrade buildings in place (spec §7.2) so you build up, not out.
-- Cards you can feel: e.g. whole-chain boosts; inspect shows active card effects.
-- Why: James ran out of map space and single-stage speed cards did nothing on balanced chains.
+### M1.6 — Room to grow ✅
+- Move buildings (between waves). Upgrade buildings in place to tier 2/3 (spec §7.2) so you build up, not out.
+- Cards you can feel: Overclock, Wider links, Rich seams, Free upgrade; card advice covers them.
+- Staggered stage rates so the starter chain has one bottleneck (the extractor) and each boost helps.
+- Port-slot notches; links drawn in side-by-side lanes with smarter bends; tier borders and pips.
+- Why: James ran out of map space, couldn't see free link slots, and speed cards never helped.
 
 ### M1.4 — Research (minimal)
 - Lab building, red science pack recipe, 4–6 research nodes from content.
