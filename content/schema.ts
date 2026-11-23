@@ -139,6 +139,40 @@ export const ResearchNodeSchema = z.object({
   requires: z.array(id).default([]),
 });
 
+/* ---------- cards (reward pick between waves, spec §2) ---------- */
+/**
+ * Card effects. Placeholder set for Phase 1: factory-side only, so no card makes towers stronger
+ * without the factory (CLAUDE.md core pillar).
+ */
+export const CardEffectSchema = z.discriminatedUnion("type", [
+  /** add items to the stockpile */
+  z.object({ type: z.literal("grant"), items: z.array(StackSchema).min(1) }),
+  /** multiply the speed of these buildings (stacks multiplicatively) */
+  z.object({ type: z.literal("speed"), buildingIds: z.array(id).min(1), multiplier: z.number().positive() }),
+]);
+
+export const CardSchema = z.object({
+  id,
+  name: z.string().min(1),
+  text: z.string().min(1),
+  effect: CardEffectSchema,
+});
+
+/* ---------- run rules ---------- */
+export const RulesSchema = z.object({
+  /** cards offered after each wave */
+  cardsOffered: z.number().int().min(1).max(5),
+  /**
+   * Starting a wave early in the build break pays a bonus that shrinks linearly to 0 at `windowSeconds`.
+   * Not paid for wave 1 (that break is for the opening build).
+   */
+  earlyStart: z.object({ windowSeconds: z.number().positive(), maxBonus: StackSchema }),
+  /** fraction of build cost refunded on remove */
+  refund: z.object({ buildBreak: z.number().min(0).max(1), wave: z.number().min(0).max(1) }),
+  /** stars: core HP fraction needed for 3 and 2 stars when the run is won (1 star = won) */
+  stars: z.object({ three: z.number().min(0).max(1), two: z.number().min(0).max(1) }),
+});
+
 /* ---------- bundle ---------- */
 export const ContentSchema = z.object({
   items: z.array(ItemSchema),
@@ -149,6 +183,8 @@ export const ContentSchema = z.object({
   ammo: z.array(AmmoSchema),
   enemies: z.array(EnemySchema),
   research: z.array(ResearchNodeSchema),
+  cards: z.array(CardSchema),
+  rules: RulesSchema,
   maps: z.array(MapSchema).min(1),
 });
 
@@ -212,6 +248,7 @@ export function crossCheck(c: Content): string[] {
     ["tower", c.towers.map((t) => t.id)],
     ["enemy", c.enemies.map((e) => e.id)],
     ["research", c.research.map((r) => r.id)],
+    ["card", c.cards.map((x) => x.id)],
     ["map", c.maps.map((m) => m.id)],
   ] as const)
     for (const d of dupes([...list])) errs.push(`duplicate ${what} id '${d}'`);
@@ -246,6 +283,13 @@ export function crossCheck(c: Content): string[] {
     r.cost.forEach((s) => needItem(`research ${r.id}`, s.itemId));
     r.requires.forEach((q) => needResearch(`research ${r.id} requires`, q));
   }
+  for (const card of c.cards) {
+    if (card.effect.type === "grant") card.effect.items.forEach((s) => needItem(`card ${card.id}`, s.itemId));
+    else card.effect.buildingIds.forEach((b) => { if (!buildings.has(b)) errs.push(`card ${card.id}: unknown building '${b}'`); });
+  }
+  if (c.cards.length && c.cards.length < c.rules.cardsOffered) errs.push(`rules: offers ${c.rules.cardsOffered} cards but only ${c.cards.length} exist`);
+  needItem("rules earlyStart", c.rules.earlyStart.maxBonus.itemId);
+  if (c.rules.stars.two > c.rules.stars.three) errs.push("rules: stars.two must be ≤ stars.three");
   for (const m of c.maps) {
     errs.push(...checkMap(m));
     m.startingStock.forEach((s) => needItem(`map ${m.id} stock`, s.itemId));

@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { biome1 } from "../content/biome1";
 import { GUNS, RUN_A, RUN_B, type Script } from "../content/scenarios";
-import { makeGameCtx, newGame, step, type GameState } from "../core/game";
+import { makeGameCtx, newGame, step, type GameInput, type GameState } from "../core/game";
 import { hashState } from "../core/hash";
 
 const DT = 0.1;
@@ -30,14 +30,18 @@ function play(script: Script) {
     s = step(s, script[i] ?? [], DT, ctx);
     if (s.errors.length) throw new Error(`tick ${i}: ${s.errors.join("; ")}`);
   }
+  const stockAtWave1 = { ...s.stock };
   const waves: WaveResult[] = [];
   while (s.phase === "build") {
     const before = s;
-    s = step(s, [{ type: "startWave" }], DT, ctx);
+    // same policy in both runs: take the first card offered (same seed ⇒ same offers while waves line up)
+    const pick: GameInput[] = s.cardOffer ? [{ type: "pickCard", cardId: s.cardOffer[0]! }] : [];
+    s = step(s, [...pick, { type: "startWave" }], DT, ctx);
+    if (s.errors.length) throw new Error(s.errors.join("; "));
     while (s.phase === "wave") s = step(s, [], DT, ctx);
     waves.push({ wave: before.waveIndex + 1, kills: s.kills - before.kills, leaked: s.leaked - before.leaked, coreHp: s.coreHp });
   }
-  return { final: s, waves };
+  return { final: s, waves, stockAtWave1 };
 }
 
 describe("the interlock: factory throughput = damage output", () => {
@@ -58,8 +62,8 @@ describe("the interlock: factory throughput = damage output", () => {
   it("both runs pay for everything from the same 20 starting ingots", () => {
     const start = map.startingStock.find((x) => x.itemId === "iron_ingot")!.qty;
     expect(start).toBe(20);
-    expect(A.final.stock.iron_ingot).toBeCloseTo(0, 9);
-    expect(B.final.stock.iron_ingot).toBeCloseTo(0, 9);
+    expect(A.stockAtWave1.iron_ingot).toBeCloseTo(0, 9);
+    expect(B.stockAtWave1.iron_ingot).toBeCloseTo(0, 9);
   });
 
   it("run A is ammo-limited: three Gunners want more than one chain makes", () => {
@@ -73,12 +77,16 @@ describe("the interlock: factory throughput = damage output", () => {
 
   it("run B kills measurably more and leaks less", () => {
     expect(B.final.kills).toBeGreaterThan(A.final.kills * 1.2);
-    expect(B.final.leaked).toBeLessThan(A.final.leaked);
+    // compare leaks over the waves both runs played (B lasting longer means it meets more enemies)
+    const common = Math.min(A.waves.length, B.waves.length);
+    const leaks = (r: typeof A) => r.waves.slice(0, common).reduce((t, w) => t + w.leaked, 0);
+    expect(leaks(B)).toBeLessThan(leaks(A));
   });
 
-  it("run B loses less core HP and gets further", () => {
-    expect(map.coreHp - B.final.coreHp).toBeLessThan(map.coreHp - A.final.coreHp);
-    expect(B.final.waveIndex).toBeGreaterThanOrEqual(A.final.waveIndex);
+  it("run B survives longer: clears more waves, or the same number with more core HP", () => {
+    const further = B.final.waveIndex > A.final.waveIndex;
+    const sameButHealthier = B.final.waveIndex === A.final.waveIndex && B.final.coreHp > A.final.coreHp;
+    expect(further || sameButHealthier).toBe(true);
   });
 
   it("both runs are deterministic", () => {

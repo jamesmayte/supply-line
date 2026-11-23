@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { biome1 } from "../content/biome1";
-import { applyCommands, makeGameCtx, newGame, pickTarget, shotDamage, spendable, step, type GameInput, type GameState } from "../core/game";
+import { applyCommands, earlyStartBonus, makeGameCtx, newGame, pickTarget, shotDamage, spendable, starsFor, step, type GameInput, type GameState } from "../core/game";
 import { hashState } from "../core/hash";
 import { positionAt } from "../core/path";
 
@@ -20,6 +20,13 @@ function run(state: GameState, seconds: number, inputs: Record<number, GameInput
   }
   return state;
 }
+/** Pick the first offered card (if any) and start the next wave. Throws instead of looping on a rejected command. */
+const startNext = (s: GameState): GameState => {
+  const pick: GameInput[] = s.cardOffer ? [{ type: "pickCard", cardId: s.cardOffer[0]! }] : [];
+  const next = step(s, [...pick, { type: "startWave" }], DT, ctx);
+  if (next.errors.length) throw new Error(next.errors.join("; "));
+  return next;
+};
 const untilBuild = (s: GameState, max = 300) => {
   for (let i = 0; i < max / DT && s.phase === "wave"; i++) s = step(s, [], DT, ctx);
   return s;
@@ -64,7 +71,7 @@ describe("enemies and waves", () => {
 
   it("the run is lost when core HP hits 0", () => {
     let s = newGame(biome1, MAP, 1);
-    for (let w = 0; w < map.waves.length && s.phase === "build"; w++) s = untilBuild(step(s, [{ type: "startWave" }], DT, ctx));
+    for (let w = 0; w < map.waves.length && s.phase === "build"; w++) s = untilBuild(startNext(s));
     expect(s.phase).toBe("lost");
     expect(s.coreHp).toBe(0);
     expect(step(s, [], DT, ctx)).toEqual({ ...s, errors: [] }); // frozen once over
@@ -136,7 +143,7 @@ describe("factory feeds the fight", () => {
 describe("determinism", () => {
   const script = (seed: number) => {
     let s = run(newGame(biome1, MAP, seed), 30, { 0: [...BUILD, FEED] });
-    for (let w = 0; w < 3 && s.phase === "build"; w++) s = untilBuild(step(s, [{ type: "startWave" }], DT, ctx));
+    for (let w = 0; w < 3 && s.phase === "build"; w++) s = untilBuild(startNext(s));
     return s;
   };
 
@@ -211,11 +218,14 @@ describe("build costs (M0.7)", () => {
     expect(h.inputs.bullets).toBe(7); // other items untouched
   });
 
-  it("removing a building refunds nothing (for now)", () => {
+  it("removing refunds the full cost in a build break, half during a wave", () => {
     const placed = step(newGame(biome1, MAP, 1), [{ type: "place", buildingId: "smelter", x: 6, y: 7 }], DT, ctx);
-    const removed = step(placed, [{ type: "remove", nodeId: placed.factory.nodes[0]!.id }], DT, ctx);
-    expect(removed.factory.nodes).toEqual([]);
-    expect(removed.stock.iron_ingot).toBe(start - ingots("smelter"));
+    const id = placed.factory.nodes[0]!.id;
+    const inBreak = step(placed, [{ type: "remove", nodeId: id }], DT, ctx);
+    expect(inBreak.factory.nodes).toEqual([]);
+    expect(inBreak.stock.iron_ingot).toBe(start);
+    const inWave = step(step(placed, [{ type: "startWave" }], DT, ctx), [{ type: "remove", nodeId: id }], DT, ctx);
+    expect(inWave.stock.iron_ingot).toBe(start - ingots("smelter") * (1 - biome1.rules.refund.wave));
   });
 });
 
@@ -234,5 +244,66 @@ describe("applyCommands (build while paused)", () => {
     const s = run(newGame(biome1, MAP, 1), 2);
     const cmd: GameInput[] = [{ type: "place", buildingId: "hub", x: 7, y: 5 }];
     expect(hashState(step(applyCommands(s, cmd, ctx), [], DT, ctx))).toBe(hashState(step(s, cmd, DT, ctx)));
+  });
+});
+
+describe("run loop (M1.3): cards, early start, stars", () => {
+  const afterWave1 = (seed = 1) => untilBuild(step(newGame(biome1, MAP, seed), [{ type: "startWave" }], DT, ctx));
+  it("after a wave, the seeded RNG offers distinct cards from content", () => {
+    const s = afterWave1();
+    expect(s.phase).toBe("build");
+    expect(s.cardOffer).toHaveLength(biome1.rules.cardsOffered);
+    expect(new Set(s.cardOffer).size).toBe(s.cardOffer!.length);
+    for (const id of s.cardOffer!) expect(biome1.cards.map((c) => c.id)).toContain(id);
+    expect(afterWave1().cardOffer).toEqual(s.cardOffer); // same seed, same offer
+    const offers = new Set([1, 2, 3, 4, 5, 6, 7, 8].map((seed) => afterWave1(seed).cardOffer!.join()));
+    expect(offers.size).toBeGreaterThan(1); // the seed matters
+  });
+
+  it("no card is offered before wave 1", () => {
+    expect(newGame(biome1, MAP, 1).cardOffer).toBeNull();
+  });
+
+  it("the next wave can't start until a card is picked; only offered cards can be picked", () => {
+    const s = afterWave1();
+    expect(step(s, [{ type: "startWave" }], DT, ctx).errors[0]).toMatch(/pick a card/);
+    const notOffered = biome1.cards.find((c) => !s.cardOffer!.includes(c.id));
+    if (notOffered) expect(step(s, [{ type: "pickCard", cardId: notOffered.id }], DT, ctx).errors[0]).toMatch(/isn't on offer/);
+    const picked = step(s, [{ type: "pickCard", cardId: s.cardOffer![0]! }, { type: "startWave" }], DT, ctx);
+    expect(picked.errors).toEqual([]);
+    expect(picked.cards).toEqual([s.cardOffer![0]]);
+    expect(picked.phase).toBe("wave");
+  });
+
+  it("a grant card adds to the stockpile; a speed card speeds those buildings up", () => {
+    const s = { ...afterWave1(), cardOffer: ["scrap_haul", "better_drills", "hot_smelters"] };
+    const haul = step(s, [{ type: "pickCard", cardId: "scrap_haul" }], DT, ctx);
+    expect(haul.stock.iron_ingot).toBe(s.stock.iron_ingot! + 8);
+    const drills = step(s, [{ type: "pickCard", cardId: "better_drills" }, { type: "place", buildingId: "extractor", x: 7, y: 7 }], DT, ctx);
+    const later = run(drills, 2);
+    expect(later.factory.nodes[0]!.produced).toBeCloseTo((2 + DT) * 1.25, 6);
+  });
+
+  it("starting early pays a bonus that shrinks to 0 over the window; none for wave 1", () => {
+    const { windowSeconds, maxBonus } = biome1.rules.earlyStart;
+    expect(earlyStartBonus(newGame(biome1, MAP, 1), ctx).qty).toBe(0);
+    const w1 = afterWave1();
+    const s = step(w1, [{ type: "pickCard", cardId: w1.cardOffer![0]! }], DT, ctx);
+    expect(earlyStartBonus(s, ctx)).toEqual({ itemId: maxBonus.itemId, qty: maxBonus.qty }); // right after the wave
+    const started = step(s, [{ type: "startWave" }], DT, ctx);
+    expect(started.stock.iron_ingot).toBe((s.stock.iron_ingot ?? 0) + maxBonus.qty);
+    const half = run(s, windowSeconds / 2);
+    expect(earlyStartBonus(half, ctx).qty).toBe(Math.round(maxBonus.qty / 2));
+    const waited = run(s, windowSeconds);
+    expect(earlyStartBonus(waited, ctx).qty).toBe(0);
+    expect(step(waited, [{ type: "startWave" }], DT, ctx).stock.iron_ingot).toBe(waited.stock.iron_ingot);
+  });
+
+  it("stars come from core HP left, and only for a win", () => {
+    const base = newGame(biome1, MAP, 1);
+    expect(starsFor({ ...base, phase: "won", coreHp: 100 }, ctx, 100)).toBe(3);
+    expect(starsFor({ ...base, phase: "won", coreHp: 60 }, ctx, 100)).toBe(2);
+    expect(starsFor({ ...base, phase: "won", coreHp: 10 }, ctx, 100)).toBe(1);
+    expect(starsFor({ ...base, phase: "lost", coreHp: 0 }, ctx, 100)).toBe(0);
   });
 });
