@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { biome1 } from "../content/biome1";
 import { makeGameCtx, newGame, step, type GameInput, type GameState } from "../core/game";
-import { buildOptions, nodeAt, proposeLink } from "../harness/ui";
+import { buildOptions, inspect, nodeAt, proposeLink, upstreamProblem } from "../harness/ui";
 
 const ctx = makeGameCtx(biome1, "scrapyard_1");
 const fresh = () => newGame(biome1, "scrapyard_1", 1);
@@ -94,5 +94,51 @@ describe("drag to link", () => {
   it("finds nodes by tile", () => {
     expect(nodeAt(base, 6, 7)?.id).toBe(2);
     expect(nodeAt(base, 0, 0)).toBeUndefined();
+  });
+});
+
+describe("inspect sheet", () => {
+  const run = (s: GameState, seconds: number) => {
+    for (let i = 0; i < seconds / 0.1; i++) s = step(s, [], 0.1, ctx);
+    return s;
+  };
+  const chain = (powered: boolean) =>
+    apply(fresh(), [
+      ...(powered ? [{ type: "place", buildingId: "extractor", x: 7, y: 3 } as GameInput, { type: "place", buildingId: "generator", x: 7, y: 4 } as GameInput] : []),
+      { type: "place", buildingId: "extractor", x: 7, y: 7 },
+      { type: "place", buildingId: "smelter", x: 6, y: 7 },
+      { type: "place", buildingId: "assembler", x: 6, y: 6, recipeId: "make_bullets" },
+      { type: "placeTower", towerId: "gunner", x: 6, y: 8 },
+    ]);
+  const ids = (s: GameState) => s.factory.nodes.map((n) => n.id);
+
+  it("a tower with no ammo link says so", () => {
+    const s = chain(false);
+    const gun = s.factory.nodes.find((n) => n.towerId)!;
+    expect(upstreamProblem(ctx, s, gun)).toMatch(/No ammo link/);
+  });
+
+  it("names every unpowered building upstream of a dry Gunner, furthest first", () => {
+    let s = chain(false);
+    const [ext, sm, asm, gun] = ids(s) as [number, number, number, number];
+    s = apply(s, [{ type: "link", from: ext, to: sm }, { type: "link", from: sm, to: asm }, { type: "link", from: asm, to: gun }]);
+    s = run(s, 5);
+    const g = s.factory.nodes.find((n) => n.id === gun)!;
+    expect(g.status).toBe("starved");
+    expect(upstreamProblem(ctx, s, g)).toMatch(/^Smelter and Assembler: bullets are unpowered/);
+  });
+
+  it("a powered chain shows no problem, and the tower sheet shows its magazine and rates", () => {
+    let s = chain(true);
+    const [coal, gen, ext, sm, asm, gun] = ids(s) as [number, number, number, number, number, number];
+    s = apply(s, [{ type: "link", from: coal, to: gen }, { type: "link", from: ext, to: sm }, { type: "link", from: sm, to: asm }, { type: "link", from: asm, to: gun }]);
+    s = run(s, 20);
+    const g = s.factory.nodes.find((n) => n.id === gun)!;
+    const info = inspect(ctx, s, g, 0);
+    expect(info.title).toBe("Gunner");
+    expect(info.lines.map((l) => l.label)).toEqual(expect.arrayContaining(["Magazine", "Stated fire rate", "Firing (last 5 s)", "Ammo arriving"]));
+    expect(info.problem).toBeUndefined();
+    const smelter = inspect(ctx, s, s.factory.nodes.find((n) => n.id === sm)!);
+    expect(smelter.lines.find((l) => l.label === "Utilisation")?.value).toBe("100%");
   });
 });

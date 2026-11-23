@@ -58,6 +58,9 @@ const raw = {
     { id: "walker", name: "Walker", hp: 80, speed: 0.8, coreDamage: 5 },
     { id: "swarmer", name: "Swarmer", hp: 24, speed: 1.6, coreDamage: 2 },
     { id: "armoured", name: "Armoured", hp: 240, speed: 0.5, armour: 0.6, coreDamage: 15 },
+    // M1.3: mini-boss (waves 5, 10) and map boss (wave 15). Boss adds (spec §6) come later.
+    { id: "brute", name: "Brute", hp: 400, speed: 0.4, coreDamage: 25 },
+    { id: "boss", name: "Scrap Titan", hp: 1500, speed: 0.3, armour: 0.2, coreDamage: 100 },
   ],
 
   research: [
@@ -66,6 +69,21 @@ const raw = {
     { id: "cannon_shells", name: "Cannon + shells", branch: "arsenal", tier: 1, cost: [{ itemId: "red_pack", qty: 20 }], time: 30, requires: ["press_plates"] },
     { id: "gen_efficiency", name: "Generator efficiency", branch: "power", tier: 1, cost: [{ itemId: "red_pack", qty: 10 }], time: 20 },
   ],
+
+  // Placeholder reward cards (M1.3): factory-side only, nothing buffs towers directly.
+  cards: [
+    { id: "scrap_haul", name: "Scrap haul", text: "+8 iron ingots", effect: { type: "grant", items: [{ itemId: "iron_ingot", qty: 8 }] } },
+    { id: "better_drills", name: "Better drills", text: "Extractors +25% speed", effect: { type: "speed", buildingIds: ["extractor"], multiplier: 1.25 } },
+    { id: "hot_smelters", name: "Hot smelters", text: "Smelters +25% speed", effect: { type: "speed", buildingIds: ["smelter"], multiplier: 1.25 } },
+    { id: "quick_assembly", name: "Quick assembly", text: "Assemblers +25% speed", effect: { type: "speed", buildingIds: ["assembler"], multiplier: 1.25 } },
+  ],
+
+  rules: {
+    cardsOffered: 3,
+    earlyStart: { windowSeconds: 20, maxBonus: { itemId: "iron_ingot", qty: 4 } },
+    refund: { buildBreak: 1, wave: 0.5 },
+    stars: { three: 0.9, two: 0.5 },
+  },
 
   maps: [
     {
@@ -93,12 +111,24 @@ const raw = {
       path: [[4, 0], [4, 4], [1, 4], [1, 9], [7, 9], [7, 15]],
       coreHp: 100,
       startingStock: [{ itemId: "iron_ingot", qty: 20 }],
+      // 15 waves (M1.3). Curve: 1–4 easy (one fed Gunner holds them), ramp from 5,
+      // mini-bosses on 5 and 10, boss on 15. Tuned against tests/waves.test.ts.
       waves: [
-        { number: 1, groups: [{ enemyId: "walker", count: 6, spacing: 1.5 }] },
-        { number: 2, groups: [{ enemyId: "walker", count: 10, spacing: 1.2 }] },
-        { number: 3, groups: [{ enemyId: "swarmer", count: 12, spacing: 0.4 }] },
-        { number: 4, groups: [{ enemyId: "walker", count: 10, spacing: 1 }, { enemyId: "swarmer", count: 10, spacing: 0.4, delay: 6 }] },
-        { number: 5, groups: [{ enemyId: "walker", count: 8, spacing: 1 }, { enemyId: "armoured", count: 2, spacing: 4, delay: 4 }] },
+        { number: 1, groups: [{ enemyId: "walker", count: 4, spacing: 2.5 }] },
+        { number: 2, groups: [{ enemyId: "walker", count: 6, spacing: 2 }] },
+        { number: 3, groups: [{ enemyId: "swarmer", count: 8, spacing: 0.8 }] },
+        { number: 4, groups: [{ enemyId: "walker", count: 5, spacing: 2.5 }, { enemyId: "swarmer", count: 4, spacing: 0.8, delay: 6 }] },
+        { number: 5, groups: [{ enemyId: "walker", count: 6, spacing: 1.5 }, { enemyId: "brute", count: 1, spacing: 1, delay: 6 }] },
+        { number: 6, groups: [{ enemyId: "walker", count: 10, spacing: 1.2 }, { enemyId: "swarmer", count: 6, spacing: 0.5, delay: 8 }] },
+        { number: 7, groups: [{ enemyId: "swarmer", count: 12, spacing: 0.4 }, { enemyId: "armoured", count: 1, spacing: 4, delay: 3 }] },
+        { number: 8, groups: [{ enemyId: "walker", count: 14, spacing: 1 }] },
+        { number: 9, groups: [{ enemyId: "walker", count: 8, spacing: 1.2 }, { enemyId: "swarmer", count: 10, spacing: 0.5, delay: 6 }] },
+        { number: 10, groups: [{ enemyId: "walker", count: 6, spacing: 1.5 }, { enemyId: "brute", count: 2, spacing: 8, delay: 4 }] },
+        { number: 11, groups: [{ enemyId: "walker", count: 12, spacing: 1.1 }, { enemyId: "armoured", count: 1, spacing: 4, delay: 5 }] },
+        { number: 12, groups: [{ enemyId: "swarmer", count: 16, spacing: 0.4 }, { enemyId: "walker", count: 8, spacing: 1.2, delay: 5 }] },
+        { number: 13, groups: [{ enemyId: "walker", count: 14, spacing: 1 }, { enemyId: "armoured", count: 2, spacing: 5, delay: 6 }] },
+        { number: 14, groups: [{ enemyId: "walker", count: 12, spacing: 1 }, { enemyId: "swarmer", count: 14, spacing: 0.4, delay: 5 }, { enemyId: "brute", count: 2, spacing: 6, delay: 12 }] },
+        { number: 15, groups: [{ enemyId: "boss", count: 1, spacing: 1 }, { enemyId: "walker", count: 8, spacing: 2, delay: 4 }, { enemyId: "armoured", count: 1, spacing: 5, delay: 10 }] },
       ],
     },
   ],

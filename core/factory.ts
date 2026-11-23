@@ -63,9 +63,14 @@ export interface FactoryState {
   nextId: number;
   nodes: FactoryNode[];
   links: FactoryLink[];
+  /** speed multipliers by building id from run effects (cards); absent = 1 */
+  speedMult?: Record<string, number>;
 }
 
 export const emptyFactory = (): FactoryState => ({ nextId: 1, nodes: [], links: [] });
+
+/** Effective speed of a building: content speed × any run multipliers. */
+export const speedOf = (state: FactoryState, b: Building): number => b.speed * (state.speedMult?.[b.id] ?? 1);
 
 /** Static lookups built once from content. */
 export interface FactoryCtx {
@@ -180,7 +185,7 @@ function stepProduction(ctx: FactoryCtx, state: FactoryState, dt: number): void 
     const outSpace = Math.max(0, b.bufferSize - n.output);
 
     if (n.oreId && b.extractRate) {
-      const max = b.extractRate * b.speed * dt;
+      const max = b.extractRate * speedOf(state, b) * dt;
       const made = Math.min(max, outSpace);
       n.output += made;
       n.produced += made;
@@ -196,7 +201,7 @@ function stepProduction(ctx: FactoryCtx, state: FactoryState, dt: number): void 
       continue;
     }
     // fraction of one craft this tick, limited by time, inputs and output space
-    const maxCrafts = (dt * b.speed) / recipe.time;
+    const maxCrafts = (dt * speedOf(state, b)) / recipe.time;
     const outQty = recipe.outputs[0]!.qty;
     const byOutput = outSpace / outQty;
     const byInput = Math.min(...recipe.inputs.map((s) => (n.inputs[s.itemId] ?? 0) / s.qty));

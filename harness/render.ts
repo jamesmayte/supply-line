@@ -26,6 +26,8 @@ const ENEMY_STYLE: Record<string, { colour: string; r: number }> = {
   walker: { colour: "#d9d4c7", r: 0.22 },
   swarmer: { colour: "#9fd36b", r: 0.15 },
   armoured: { colour: "#8a8f99", r: 0.3 },
+  brute: { colour: "#b5523f", r: 0.36 },
+  boss: { colour: "#7b4fb3", r: 0.45 },
 };
 
 /** Transient UI drawn over the map: a selected tile and/or a link being dragged. */

@@ -17,13 +17,15 @@ import { emptyFactory, makeFactoryCtx, type FactoryCtx, type FactoryNode, type F
 import { applyFactoryCommand, type FactoryCommand } from "./factoryBuild";
 import { buildGrid } from "./grid";
 import { buildPath, positionAt, tileCentre, type Path, type Point } from "./path";
-import type { RngState } from "./rng";
+import { nextRandom, type RngState } from "./rng";
 import { stepTowers, type FireFn } from "./towers";
 
 type EnemyDef = Content["enemies"][number];
 type Ammo = Content["ammo"][number];
 type Tower = Content["towers"][number];
 type Wave = Content["maps"][number]["waves"][number];
+type Card = Content["cards"][number];
+type Rules = Content["rules"];
 type Stack = Content["buildings"][number]["buildCost"][number];
 
 export interface Enemy {
@@ -63,9 +65,15 @@ export interface GameState {
   damageDealt: number;
   /** commands rejected on the last tick, for the UI */
   errors: string[];
+  /** seconds since the current build break began (drives the early-start bonus) */
+  breakTime: number;
+  /** cards offered after the last wave; must pick one before the next wave. null = no pick pending */
+  cardOffer: string[] | null;
+  /** cards picked so far, in order */
+  cards: string[];
 }
 
-export type GameInput = FactoryCommand | { type: "startWave" };
+export type GameInput = FactoryCommand | { type: "startWave" } | { type: "pickCard"; cardId: string };
 
 export interface GameCtx {
   factory: FactoryCtx;
@@ -73,6 +81,8 @@ export interface GameCtx {
   waves: readonly Wave[];
   enemies: ReadonlyMap<string, EnemyDef>;
   ammo: ReadonlyMap<string, Ammo>;
+  cards: ReadonlyMap<string, Card>;
+  rules: Rules;
 }
 
 export function makeGameCtx(content: Content, mapId: string): GameCtx {
@@ -84,6 +94,8 @@ export function makeGameCtx(content: Content, mapId: string): GameCtx {
     waves: map.waves,
     enemies: new Map(content.enemies.map((e) => [e.id, e])),
     ammo: new Map(content.ammo.map((a) => [a.itemId, a])),
+    cards: new Map(content.cards.map((c) => [c.id, c])),
+    rules: content.rules,
   };
 }
 
@@ -106,6 +118,9 @@ export function newGame(content: Content, mapId: string, seed: number): GameStat
     leaked: 0,
     damageDealt: 0,
     errors: [],
+    breakTime: 0,
+    cardOffer: null,
+    cards: [],
   };
 }
 
@@ -182,14 +197,78 @@ function pay(state: GameState, ctx: GameCtx, cost: readonly Stack[]): void {
   }
 }
 
+/* ---------- run loop: cards, early start, refunds ---------- */
+
+/** Bonus for starting the next wave now: linear from maxBonus at the break's start to 0 at the window. */
+export function earlyStartBonus(state: GameState, ctx: GameCtx): { itemId: string; qty: number } {
+  const { windowSeconds, maxBonus } = ctx.rules.earlyStart;
+  const qty = state.waveIndex === 0 ? 0 : Math.round(maxBonus.qty * Math.max(0, 1 - state.breakTime / windowSeconds));
+  return { itemId: maxBonus.itemId, qty };
+}
+
+/** Draw `cardsOffered` distinct cards with the seeded RNG (partial Fisher–Yates over content order). */
+function drawOffer(state: GameState, ctx: GameCtx): string[] {
+  const pool = [...ctx.cards.keys()];
+  const n = Math.min(ctx.rules.cardsOffered, pool.length);
+  for (let i = 0; i < n; i++) {
+    const r = nextRandom(state.rng);
+    state.rng = r.state;
+    const j = i + Math.floor(r.value * (pool.length - i));
+    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+  }
+  return pool.slice(0, n);
+}
+
+function applyCard(state: GameState, card: Card): void {
+  const e = card.effect;
+  if (e.type === "grant") for (const it of e.items) state.stock[it.itemId] = (state.stock[it.itemId] ?? 0) + it.qty;
+  else {
+    const mult = (state.factory.speedMult ??= {});
+    for (const b of e.buildingIds) mult[b] = (mult[b] ?? 1) * e.multiplier;
+  }
+}
+
+/** What removing a node gives back right now (fraction of its build cost by phase). */
+export function refundOf(state: GameState, ctx: GameCtx, node: FactoryNode): Stack[] {
+  const cost = node.towerId ? ctx.factory.towers.get(node.towerId)?.buildCost : ctx.factory.buildings.get(node.buildingId)?.buildCost;
+  const frac = state.phase === "wave" ? ctx.rules.refund.wave : ctx.rules.refund.buildBreak;
+  return (cost ?? []).map((c) => ({ itemId: c.itemId, qty: c.qty * frac })).filter((c) => c.qty > 0);
+}
+
+/** Stars for a finished run: 0 if lost, else by core HP fraction left (content rules). */
+export function starsFor(state: GameState, ctx: GameCtx, maxCoreHp: number): number {
+  if (state.phase !== "won") return 0;
+  const f = state.coreHp / maxCoreHp;
+  return f >= ctx.rules.stars.three ? 3 : f >= ctx.rules.stars.two ? 2 : 1;
+}
+
 function applyInput(state: GameState, ctx: GameCtx, input: GameInput): string | undefined {
   if (input.type === "startWave") {
     if (state.phase !== "build") return `can't start a wave during '${state.phase}'`;
+    if (state.cardOffer) return "pick a card first";
+    const bonus = earlyStartBonus(state, ctx);
+    if (bonus.qty > 0) state.stock[bonus.itemId] = (state.stock[bonus.itemId] ?? 0) + bonus.qty;
     state.phase = "wave";
     state.wave = { time: 0, spawned: ctx.waves[state.waveIndex]!.groups.map(() => 0) };
     return undefined;
   }
+  if (input.type === "pickCard") {
+    if (!state.cardOffer) return "no card to pick";
+    if (!state.cardOffer.includes(input.cardId)) return `card '${input.cardId}' isn't on offer`;
+    applyCard(state, ctx.cards.get(input.cardId)!);
+    state.cards.push(input.cardId);
+    state.cardOffer = null;
+    return undefined;
+  }
   if (state.phase === "won" || state.phase === "lost") return "run is over";
+  if (input.type === "remove") {
+    const node = state.factory.nodes.find((n) => n.id === input.nodeId);
+    const r = applyFactoryCommand(state.factory, ctx.factory, input);
+    if (r.error || !node) return r.error ?? "unknown node";
+    for (const c of refundOf(state, ctx, node)) state.stock[c.itemId] = (state.stock[c.itemId] ?? 0) + c.qty;
+    state.factory = r.state;
+    return undefined;
+  }
   const r = applyFactoryCommand(state.factory, ctx.factory, input);
   if (r.error) return r.error;
   const cost = costOf(ctx, input);
@@ -262,6 +341,10 @@ function settle(state: GameState, ctx: GameCtx): void {
     state.wave = null;
     state.waveIndex++;
     state.phase = state.waveIndex >= ctx.waves.length ? "won" : "build";
+    if (state.phase === "build") {
+      state.breakTime = 0;
+      if (ctx.cards.size) state.cardOffer = drawOffer(state, ctx);
+    }
   }
 }
 
@@ -288,6 +371,7 @@ export function step(state: GameState, input: readonly GameInput[], dt: number, 
   const next = structuredClone(state);
   applyAll(next, ctx, input);
   if (next.phase === "won" || next.phase === "lost") return next;
+  if (next.phase === "build") next.breakTime += dt;
   spawn(next, ctx, dt);
   moveEnemies(next, ctx, dt);
   next.factory = stepFactory(next.factory, ctx.factory, dt);
