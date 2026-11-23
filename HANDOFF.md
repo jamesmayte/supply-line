@@ -174,10 +174,57 @@ https://jamesmayte.github.io/supply-line/ (after merge). It opens on **Empty** w
 5. Tap **Play**, wait for the Gunner's ring to fill, then **Start wave**.
 6. Hold a building to remove it or unlink it.
 
+- **M1.3 done** (run loop):
+  - **15 waves** on scrapyard_1: waves 1–4 easy, ramp from 5, **Brute** mini-boss on 5 and 10
+    (400 HP, slow), **Scrap Titan** boss on 15 (1500 HP, armour 0.2; its adds come later).
+  - **Cards:** after each wave the seeded RNG offers 3 (the RNG's first real use; covered by determinism).
+    You must pick one before the next wave. Placeholder set, **factory-side only**: +8 ingots, or
+    +25% speed for extractors / smelters / assemblers (stacks multiplicatively). No tower-buff cards (pillar).
+  - **Early-start bonus:** starting the next wave right after a break begins pays up to +4 ingots,
+    shrinking linearly to 0 over 20 s (not for wave 1). Shown on the button ("Start wave +4").
+    Also curbs the "wait in the break until every magazine and hub is full" exploit.
+  - **Refunds:** remove gives back 100% of build cost in a break, 50% during a wave (shown on Remove).
+  - **Stars:** won with ≥90% core HP = 3, ≥50% = 2, else 1. Result screen: stars, waves cleared, kills,
+    core HP, Play again.
+  - **Inspect sheet:** tap a building or tower for live stats (status, utilisation, buffers, in/out flow;
+    towers: magazine, stated vs measured fire rate over the last 5 s, ammo arriving). It names the **first
+    problem upstream** in plain words, e.g. "Smelter and Assembler: bullets are unpowered…", "No ammo link…",
+    "The chain runs flat out but can't keep up: add another chain".
+  - All rule numbers live in content (`cards`, `rules` in `content/biome1.ts`, schema-validated).
+  - Tests: run-loop rules (offers, pick gating, card effects, bonus, refunds, stars), wave curve
+    (`tests/waves.test.ts`), inspect logic. Interlock now runs 15 waves. Total 109 green, typecheck clean.
+  - Checked end to end on an emulated iPhone 13: inspect a Gunner, clear wave 1, pick a card (Start locked
+    until you do), early bonus on the button, refund note on Remove, lose a run → result screen. No page errors.
+
+### Balance after M1.3 (scripted builds; pick the first card offered; start each wave at once)
+
+| build | result |
+| --- | --- |
+| Opening, 20 ingots: 1 chain → hub → 3 Gunners (interlock A) | waves 1–3 clean, 1 leak in 4, lost on wave 8 (58 kills) |
+| + 2nd chain bought from banked ingots (interlock B) | lost on wave 11 (109 kills) |
+| 4 chains, 6 Gunners, +100 ingots (probe) | lost on wave 13 |
+
+- **A single Gunner on one chain can't hold even wave 1** (80 HP walkers need ~7 s of 2/s supply each but are
+  in range ~5.7 s). So "easy early waves" targets the natural opening build of 3 Gunners, not 1.
+- **Nothing I scripted wins wave 15 yet.** With several speed cards stacked (×2–3), the big build made more
+  bullets than 6 Gunners could fire: late game becomes **tower-limited again** (the M0.6 pattern). Whether a
+  good player can win, and whether stacking cards should be capped, is for the playtest.
+- Armoured enemies are kept light until shells/Cannon unlock in M1.4.
+
+### What to try on the phone (M1.3)
+
+https://jamesmayte.github.io/supply-line/ (after merge). Use **Demo: 1 chain** for a quick start, or build on **Empty**.
+1. **Tap a Gunner** → inspect sheet with magazine and fire rates. Tap a smelter/assembler too.
+2. Tap **Start wave**. When it's cleared, **pick a card** (the Start button stays locked until you do).
+3. Start the next wave quickly: the button shows the early bonus (**Start wave +4**), shrinking over 20 s.
+4. Hold a building: Remove shows the refund (full in a break, half during a wave).
+5. Play on until you win or lose → result screen → **Play again**.
+6. Tell me how waves 1–4 feel (too easy?), where it gets hard, and whether cards feel worth picking.
+
 ## Next
 
-**M1.3 — Run loop** (see `docs/build-plan.md`): 15 waves with card picks between waves, a result screen,
-and the inspect sheet. Includes James's progression proposals (easy early waves, early-start bonus) as content/tuning.
+**Phase 1 gate (James):** play one 15-wave run on the phone. Is it fun with no meta? Write the verdict here.
+Then **M1.4 — Research (minimal)**: Lab, red science pack, 4–6 research nodes (Cannon + shells, tier-2 links, …).
 
 ## Decisions so far
 
@@ -222,6 +269,16 @@ and the inspect sheet. Includes James's progression proposals (easy early waves,
 
 - Biome 1 enemy HP doubled (walker 80, swarmer 24, armoured 240). The M0.5 sanity table predates this.
 - The interlock scenario uses 3 Gunners so that ammo, not tower count, is the binding constraint.
+
+## Decisions in M1.3 (easy to change, flag if wrong)
+
+- Simple early-start bonus (James chose it over overlapping waves): linear from +4 to 0 over 20 s, none on wave 1.
+- Cards are drawn with replacement across picks (the same card can come back and stack); 3 distinct per offer.
+- Card effects are factory-only. A Gunner-damage card would break "towers only get stronger through the factory".
+- The card pick is a modal sheet; the build break timer keeps running while you choose (pause to think).
+- Brute/boss: no armour on the Brute, light armour on the boss, since only bullets exist before M1.4.
+- Phase 1 gate moved after M1.3 in this handoff: a 15-wave run is the first thing worth judging for fun;
+  M1.4 research can follow the verdict.
 
 ## Decisions in M1.2 (easy to change, flag if wrong)
 

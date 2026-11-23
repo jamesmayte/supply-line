@@ -62,11 +62,11 @@ Repo, strict TS, Vitest, Zod content schema, biome 1 sample content, content val
 - Tap tile → simple build menu. Drag from building → building = link (auto L-route).
 - Long-press → delete. Pause, 1×/2× buttons in the bottom bar.
 
-### M1.3 — Run loop
+### M1.3 — Run loop ✅
 - Build break → wave → card pick (3 placeholder cards) → repeat to wave 15 → result screen.
 - Inspect sheet with rates and utilisation; empty-tower red flash.
 
-**Proposals for M1.3 (James, after M1.1; not built yet).** Target feel: like classic wave-based TD
+**Proposals for M1.3 (James, after M1.1).** Built in M1.3: early-start bonus (simple version) and the 15-wave curve. Target feel: like classic wave-based TD
 (e.g. Bloons TD 5): the first waves are very easy, a strong player wants to hurry through them for income,
 later waves get hard, and coming back with meta upgrades makes them passable.
 - **Early-start bonus:** starting the next wave before the build break would naturally end
