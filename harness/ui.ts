@@ -2,7 +2,7 @@
 // Everything here only *proposes* commands; the sim validates and applies them (CLAUDE.md invariant 4).
 import { buildingOf, outputItem, towerOf, type FactoryNode } from "../core/factory";
 import { accepts, applyFactoryCommand, occupiedTiles } from "../core/factoryBuild";
-import { spendable, type GameCtx, type GameInput, type GameState } from "../core/game";
+import { isResearched, spendable, type GameCtx, type GameInput, type GameState } from "../core/game";
 import { canPlaceBuilding, canPlaceTower, linkLength, routeLink, type TileXY } from "../core/placement";
 import type { Bottleneck, CardAdvice } from "../core/analysis";
 
@@ -13,6 +13,8 @@ export interface BuildOption {
   cost: readonly Stack[];
   affordable: boolean;
   input: GameInput;
+  /** research it still needs (option shown greyed) */
+  locked?: string;
 }
 
 const itemName = (ctx: GameCtx, id: string) => ctx.factory.items.get(id)?.name ?? id;
@@ -24,35 +26,68 @@ const plural1 = (name: string, n: number) => (n === 1 || name.endsWith("s") ? na
 const canAfford = (ctx: GameCtx, state: GameState, cost: readonly Stack[]) =>
   cost.every((c) => spendable(state, ctx, c.itemId) >= c.qty - 1e-9);
 
-/** Labs arrive with research in M1.4; hidden until then. */
-const HIDDEN_KINDS = new Set(["lab"]);
-
 /**
- * What can be built on tile (x, y): valid placements only, research-locked things hidden.
- * Buildings with several recipes get one option per available recipe.
+ * What can be built on tile (x, y): valid placements only. Research-locked things are listed but greyed,
+ * with the research they need, so you can see what's coming. Buildings with several recipes get one
+ * option per recipe.
  */
 export function buildOptions(ctx: GameCtx, state: GameState, x: number, y: number): BuildOption[] {
   const occupied = occupiedTiles(state.factory);
   const grid = ctx.factory.grid;
   const out: BuildOption[] = [];
-  const add = (label: string, cost: readonly Stack[], input: GameInput) =>
-    out.push({ label, cost, affordable: canAfford(ctx, state, cost), input });
+  const add = (label: string, cost: readonly Stack[], input: GameInput, unlockedBy?: string) => {
+    const locked = isResearched(state, unlockedBy) ? undefined : (ctx.research.get(unlockedBy!)?.name ?? unlockedBy);
+    out.push({ label, cost, affordable: !locked && canAfford(ctx, state, cost), input, ...(locked ? { locked } : {}) });
+  };
 
   for (const t of ctx.factory.content.towers) {
-    if (t.unlockedBy || !canPlaceTower(grid, x, y, occupied).ok) continue;
-    add(t.name, t.buildCost, { type: "placeTower", towerId: t.id, x, y });
+    if (!canPlaceTower(grid, x, y, occupied).ok) continue;
+    add(t.name, t.buildCost, { type: "placeTower", towerId: t.id, x, y }, t.unlockedBy);
   }
   for (const b of ctx.factory.content.buildings) {
-    if (HIDDEN_KINDS.has(b.kind) || !canPlaceBuilding(grid, b, x, y, occupied).ok) continue;
+    if (!canPlaceBuilding(grid, b, x, y, occupied).ok) continue;
     if (b.kind === "processor" || b.kind === "assembler") {
-      const recipes = ctx.factory.content.recipes.filter((r) => r.buildingId === b.id && !r.unlockedBy);
+      const recipes = ctx.factory.content.recipes.filter((r) => r.buildingId === b.id);
       for (const r of recipes) {
         const what = itemName(ctx, r.outputs[0]!.itemId).toLowerCase();
-        add(recipes.length > 1 || b.kind === "assembler" ? `${b.name}: ${what}` : b.name, b.buildCost, { type: "place", buildingId: b.id, x, y, recipeId: r.id });
+        add(recipes.length > 1 || b.kind === "assembler" ? `${b.name}: ${what}` : b.name, b.buildCost, { type: "place", buildingId: b.id, x, y, recipeId: r.id }, r.unlockedBy);
       }
     } else add(b.name, b.buildCost, { type: "place", buildingId: b.id, x, y });
   }
-  return out;
+  // unlocked first, then locked (greyed) at the end
+  return [...out.filter((o) => !o.locked), ...out.filter((o) => o.locked)];
+}
+
+/* ---------- research sheet (M1.4) ---------- */
+
+export interface ResearchRow {
+  id: string;
+  name: string;
+  text: string;
+  /** e.g. "20 red science packs · 30 s" */
+  cost: string;
+  state: "done" | "active" | "available" | "locked";
+  /** 0..1 */
+  progress: number;
+  /** for locked rows: what's missing */
+  needs?: string;
+}
+
+/** Every research node with its state, for the Lab's sheet. */
+export function researchRows(ctx: GameCtx, state: GameState): ResearchRow[] {
+  return [...ctx.research.values()].map((r) => {
+    const missing = r.requires.filter((q) => !isResearched(state, q));
+    const st: ResearchRow["state"] = isResearched(state, r.id) ? "done" : state.research.active === r.id ? "active" : missing.length ? "locked" : "available";
+    return {
+      id: r.id,
+      name: r.name,
+      text: r.text,
+      cost: `${costLabel(ctx, r.cost)} · ${r.time} s`,
+      state: st,
+      progress: state.research.progress[r.id] ?? 0,
+      ...(missing.length ? { needs: `needs ${missing.map((q) => ctx.research.get(q)?.name ?? q).join(", ")}` } : {}),
+    };
+  });
 }
 
 export const nodeAt = (state: GameState, x: number, y: number): FactoryNode | undefined =>
@@ -80,8 +115,13 @@ export function proposeLink(ctx: GameCtx, state: GameState, from: FactoryNode, t
   const straight = [{ x: from.x, y: from.y }, { x: to.x, y: to.y }];
   if (from.id === to.id) return { ok: false, reason: "same building", route: straight };
   const len = linkLength(from, to);
-  const tier = [...ctx.factory.tiers.values()].sort((a, b) => a.tier - b.tier).find((t) => t.maxLength >= len);
-  if (!tier) return { ok: false, reason: `too long (${len} tiles)`, route: straight };
+  const tiers = [...ctx.factory.tiers.values()].sort((a, b) => a.tier - b.tier);
+  const tier = tiers.find((t) => t.maxLength >= len && isResearched(state, t.unlockedBy));
+  if (!tier) {
+    const lockedFit = tiers.find((t) => t.maxLength >= len);
+    const need = lockedFit?.unlockedBy ? ctx.research.get(lockedFit.unlockedBy)?.name : undefined;
+    return { ok: false, reason: need ? `too long (${len} tiles): needs ${need} research` : `too long (${len} tiles)`, route: straight };
+  }
   const route = routeLink(ctx.factory.grid, from, to, tier);
   const path = route.ok ? route.route : straight;
 

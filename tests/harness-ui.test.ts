@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { biome1 } from "../content/biome1";
 import { makeGameCtx, newGame, step, type GameInput, type GameState } from "../core/game";
-import { buildOptions, cardNote, inspect, nodeAt, proposeLink, upstreamProblem, waveReport, type WaveStats } from "../harness/ui";
+import { buildOptions, cardNote, inspect, nodeAt, proposeLink, researchRows, upstreamProblem, waveReport, type WaveStats } from "../harness/ui";
 
 const ctx = makeGameCtx(biome1, "scrapyard_1");
 const fresh = () => newGame(biome1, "scrapyard_1", 1);
@@ -28,12 +28,27 @@ describe("build menu", () => {
     expect(l).not.toContain("Extractor");
   });
 
-  it("research-locked things and labs are hidden", () => {
-    const l = labels(fresh(), 6, 6);
-    expect(l).not.toContain("Cannon");
-    expect(l).not.toContain("Assembler: shells");
-    expect(l).not.toContain("Press");
-    expect(l).not.toContain("Lab");
+  it("research-locked things are listed last, greyed, with the research they need", () => {
+    const opts = buildOptions(ctx, fresh(), 6, 6);
+    const cannon = opts.find((o) => o.label === "Cannon")!;
+    expect(cannon).toMatchObject({ locked: "Cannon + shells", affordable: false });
+    expect(opts.find((o) => o.label === "Assembler: shells")?.locked).toBe("Cannon + shells");
+    expect(opts.find((o) => o.label === "Press")?.locked).toBe("Press + plates");
+    expect(opts.find((o) => o.label === "Lab")?.locked).toBeUndefined();
+    const firstLocked = opts.findIndex((o) => o.locked);
+    expect(opts.slice(firstLocked).every((o) => o.locked)).toBe(true);
+    const sandbox = buildOptions(ctx, newGame(biome1, "scrapyard_1", 1, { allResearched: true }), 6, 6);
+    expect(sandbox.some((o) => o.locked)).toBe(false);
+  });
+
+  it("the research sheet shows each node's state", () => {
+    const rows = researchRows(ctx, { ...fresh(), research: { active: "links_t2", progress: { links_t2: 0.4 }, done: ["press_plates"], justDone: [] } });
+    const by = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(by.press_plates!.state).toBe("done");
+    expect(by.links_t2).toMatchObject({ state: "active", progress: 0.4 });
+    expect(by.cannon_shells!.state).toBe("available");
+    expect(by.links_t3).toMatchObject({ state: "locked", needs: "needs Tier 2 links" });
+    expect(by.cannon_shells!.cost).toBe("20 red science packs · 30 s");
   });
 
   it("path, rock and occupied tiles offer nothing", () => {
@@ -50,8 +65,12 @@ describe("build menu", () => {
     expect(opts.find((o) => o.label === "Gunner")!.affordable).toBe(false);
   });
 
-  it("every option is a command the sim accepts", () => {
-    for (const o of buildOptions(ctx, fresh(), 6, 6)) expect(step(fresh(), [o.input], 0.1, ctx).errors).toEqual([]);
+  it("every unlocked option is a command the sim accepts; locked ones are refused", () => {
+    for (const o of buildOptions(ctx, fresh(), 6, 6)) {
+      const errs = step(fresh(), [o.input], 0.1, ctx).errors;
+      if (o.locked) expect(errs[0]).toMatch(/needs research/);
+      else expect(errs).toEqual([]);
+    }
   });
 });
 
