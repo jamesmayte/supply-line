@@ -5,7 +5,7 @@ import { assignLanes, chooseRoutes } from "../harness/links";
 
 const ctx = makeGameCtx(biome1, "scrapyard_1");
 const build = (cmds: GameInput[]) => {
-  const s = step(newGame(biome1, "scrapyard_1", 1), cmds, 0.1, ctx);
+  const s = step(newGame(biome1, "scrapyard_1", 1, { allResearched: true }), cmds, 0.1, ctx);
   if (s.errors.length) throw new Error(s.errors.join("; "));
   return s.factory;
 };

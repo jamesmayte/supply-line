@@ -59,6 +59,8 @@ export const LinkTierSchema = z.object({
   tier: z.number().int().min(1).max(3),
   itemsPerSecond: z.number().positive(),
   maxLength: z.number().int().positive(),
+  /** research node that unlocks building links of this tier; omitted = available from the start */
+  unlockedBy: id.optional(),
 });
 
 /* ---------- towers ---------- */
@@ -142,6 +144,12 @@ export const ResearchNodeSchema = z.object({
   cost: z.array(StackSchema).min(1), // science packs
   time: z.number().positive(),
   requires: z.array(id).default([]),
+  /** what it does besides unlocking things that name it in `unlockedBy` */
+  effects: z
+    .array(z.discriminatedUnion("type", [z.object({ type: z.literal("fuelUse"), multiplier: z.number().positive() })]))
+    .default([]),
+  /** one line for the research sheet */
+  text: z.string().min(1),
 });
 
 /* ---------- cards (reward pick between waves, spec §2) ---------- */
@@ -180,6 +188,8 @@ export const RulesSchema = z.object({
   refund: z.object({ buildBreak: z.number().min(0).max(1), wave: z.number().min(0).max(1) }),
   /** stars: core HP fraction needed for 3 and 2 stars when the run is won (1 star = won) */
   stars: z.object({ three: z.number().min(0).max(1), two: z.number().min(0).max(1) }),
+  /** research (spec §7.1): labs beyond this many don't add speed */
+  maxLabs: z.number().int().positive(),
 });
 
 /* ---------- bundle ---------- */
@@ -297,6 +307,7 @@ export function crossCheck(c: Content): string[] {
     r.cost.forEach((s) => needItem(`research ${r.id}`, s.itemId));
     r.requires.forEach((q) => needResearch(`research ${r.id} requires`, q));
   }
+  for (const t of c.linkTiers) needResearch(`link tier ${t.tier}`, t.unlockedBy);
   for (const card of c.cards) {
     const e = card.effect;
     if (e.type === "grant") e.items.forEach((s) => needItem(`card ${card.id}`, s.itemId));

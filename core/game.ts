@@ -13,7 +13,7 @@
  *   6. remove the dead, then check win/lose/wave end
  */
 import type { Content } from "../content/schema";
-import { emptyFactory, makeFactoryCtx, type FactoryCtx, type FactoryNode, type FactoryState, stepFactory } from "./factory";
+import { buildingOf, emptyFactory, isPowered, makeFactoryCtx, type FactoryCtx, type FactoryNode, type FactoryState, stepFactory } from "./factory";
 import { applyFactoryCommand, type FactoryCommand } from "./factoryBuild";
 import { buildGrid } from "./grid";
 import { buildPath, positionAt, tileCentre, type Path, type Point } from "./path";
@@ -26,6 +26,7 @@ type Tower = Content["towers"][number];
 type Wave = Content["maps"][number]["waves"][number];
 type Card = Content["cards"][number];
 type Rules = Content["rules"];
+type ResearchNode = Content["research"][number];
 type Stack = Content["buildings"][number]["buildCost"][number];
 
 export interface Enemy {
@@ -73,11 +74,29 @@ export interface GameState {
   cards: string[];
   /** free upgrades from cards, used before paying */
   upgradeTokens: number;
+  /** in-run research (spec §7.1) */
+  research: ResearchState;
   /** links dropped by the last tick's moves (for the UI) */
   dropped: number[];
 }
 
-export type GameInput = FactoryCommand | { type: "startWave" } | { type: "pickCard"; cardId: string };
+export interface ResearchState {
+  /** node being researched now, or null */
+  active: string | null;
+  /** fraction done per node (kept if you switch away) */
+  progress: Record<string, number>;
+  /** finished nodes, in order */
+  done: string[];
+  /** nodes finished on the last tick (for the UI) */
+  justDone: string[];
+}
+
+export type GameInput =
+  | FactoryCommand
+  | { type: "startWave" }
+  | { type: "pickCard"; cardId: string }
+  /** choose what the labs research (switching keeps progress on the old node) */
+  | { type: "research"; nodeId: string };
 
 export interface GameCtx {
   factory: FactoryCtx;
@@ -87,6 +106,7 @@ export interface GameCtx {
   ammo: ReadonlyMap<string, Ammo>;
   cards: ReadonlyMap<string, Card>;
   rules: Rules;
+  research: ReadonlyMap<string, ResearchNode>;
 }
 
 export function makeGameCtx(content: Content, mapId: string): GameCtx {
@@ -100,13 +120,15 @@ export function makeGameCtx(content: Content, mapId: string): GameCtx {
     ammo: new Map(content.ammo.map((a) => [a.itemId, a])),
     cards: new Map(content.cards.map((c) => [c.id, c])),
     rules: content.rules,
+    research: new Map(content.research.map((r) => [r.id, r])),
   };
 }
 
-export function newGame(content: Content, mapId: string, seed: number): GameState {
+/** `allResearched` = Sandbox: every research node already done (for playtesting the full toolset). */
+export function newGame(content: Content, mapId: string, seed: number, opts: { allResearched?: boolean } = {}): GameState {
   const map = content.maps.find((m) => m.id === mapId);
   if (!map) throw new Error(`unknown map '${mapId}'`);
-  return {
+  const state: GameState = {
     tick: 0,
     seed,
     rng: seed | 0,
@@ -126,8 +148,11 @@ export function newGame(content: Content, mapId: string, seed: number): GameStat
     cardOffer: null,
     cards: [],
     upgradeTokens: 0,
+    research: { active: null, progress: {}, done: [], justDone: [] },
     dropped: [],
   };
+  if (opts.allResearched) for (const r of content.research) completeResearch(state, r);
+  return state;
 }
 
 const enemyDef = (ctx: GameCtx, e: Enemy): EnemyDef => {
@@ -265,6 +290,80 @@ export function starsFor(state: GameState, ctx: GameCtx, maxCoreHp: number): num
   return f >= ctx.rules.stars.three ? 3 : f >= ctx.rules.stars.two ? 2 : 1;
 }
 
+/* ---------- research ---------- */
+
+export const isResearched = (state: GameState, id?: string): boolean => !id || state.research.done.includes(id);
+
+/** The research node a command still needs, if any (recipes, towers and link tiers can be locked). */
+export function lockedBy(state: GameState, ctx: GameCtx, input: GameInput): string | undefined {
+  if (input.type === "placeTower") {
+    const t = ctx.factory.towers.get(input.towerId);
+    return t && !isResearched(state, t.unlockedBy) ? t.unlockedBy : undefined;
+  }
+  if (input.type === "place") {
+    const options = ctx.factory.content.recipes.filter((r) => r.buildingId === input.buildingId);
+    const recipe = input.recipeId ? ctx.factory.recipes.get(input.recipeId) : options.length === 1 ? options[0] : undefined;
+    return recipe && !isResearched(state, recipe.unlockedBy) ? recipe.unlockedBy : undefined;
+  }
+  if (input.type === "link") {
+    const tier = ctx.factory.tiers.get(input.tier ?? 1);
+    return tier && !isResearched(state, tier.unlockedBy) ? tier.unlockedBy : undefined;
+  }
+  return undefined;
+}
+
+function completeResearch(state: GameState, node: ResearchNode): void {
+  if (state.research.done.includes(node.id)) return;
+  state.research.done.push(node.id);
+  state.research.progress[node.id] = 1;
+  if (state.research.active === node.id) state.research.active = null;
+  for (const e of node.effects) if (e.type === "fuelUse") state.factory.fuelUse = (state.factory.fuelUse ?? 1) * e.multiplier;
+}
+
+/**
+ * Labs work on the active node: each powered lab (up to rules.maxLabs, by id) holding enough packs for this
+ * tick adds dt/time of progress and uses cost × dt/time packs. Runs during waves too.
+ */
+function stepResearch(state: GameState, ctx: GameCtx, dt: number): void {
+  state.research.justDone = [];
+  const labs = state.factory.nodes.filter((n) => !n.towerId && buildingOf(ctx.factory, n).kind === "lab");
+  const node = state.research.active ? ctx.research.get(state.research.active) : undefined;
+  let working = 0;
+  for (const lab of labs) {
+    lab.utilisation = 0;
+    if (!node) {
+      lab.status = "idle";
+      continue;
+    }
+    if (!isPowered(ctx.factory, state.factory, lab)) {
+      lab.status = "unpowered";
+      continue;
+    }
+    if (working >= ctx.rules.maxLabs) {
+      lab.status = "idle";
+      continue;
+    }
+    const share = dt / node.time;
+    const enough = node.cost.every((c) => (lab.inputs[c.itemId] ?? 0) >= c.qty * share - 1e-9);
+    if (!enough) {
+      lab.status = "starved";
+      continue;
+    }
+    for (const c of node.cost) lab.inputs[c.itemId] = Math.max(0, (lab.inputs[c.itemId] ?? 0) - c.qty * share);
+    lab.status = "working";
+    lab.utilisation = 1;
+    lab.produced += share;
+    working++;
+  }
+  if (!node || !working) return;
+  const p = (state.research.progress[node.id] ?? 0) + (working * dt) / node.time;
+  state.research.progress[node.id] = Math.min(1, p);
+  if (p >= 1 - 1e-9) {
+    completeResearch(state, node);
+    state.research.justDone.push(node.id);
+  }
+}
+
 function applyInput(state: GameState, ctx: GameCtx, input: GameInput): string | undefined {
   if (input.type === "startWave") {
     if (state.phase !== "build") return `can't start a wave during '${state.phase}'`;
@@ -284,6 +383,17 @@ function applyInput(state: GameState, ctx: GameCtx, input: GameInput): string | 
     return undefined;
   }
   if (state.phase === "won" || state.phase === "lost") return "run is over";
+  if (input.type === "research") {
+    const node = ctx.research.get(input.nodeId);
+    if (!node) return `unknown research '${input.nodeId}'`;
+    if (state.research.done.includes(node.id)) return `${node.name} is already researched`;
+    const missing = node.requires.filter((r) => !state.research.done.includes(r));
+    if (missing.length) return `needs ${missing.map((r) => ctx.research.get(r)?.name ?? r).join(", ")} first`;
+    state.research.active = node.id;
+    return undefined;
+  }
+  const locked = lockedBy(state, ctx, input);
+  if (locked) return `needs research: ${ctx.research.get(locked)?.name ?? locked}`;
   if (input.type === "remove") {
     const node = state.factory.nodes.find((n) => n.id === input.nodeId);
     const r = applyFactoryCommand(state.factory, ctx.factory, input);
@@ -408,6 +518,7 @@ export function step(state: GameState, input: readonly GameInput[], dt: number, 
   spawn(next, ctx, dt);
   moveEnemies(next, ctx, dt);
   next.factory = stepFactory(next.factory, ctx.factory, dt);
+  stepResearch(next, ctx, dt);
   fireTowers(next, ctx, dt);
   settle(next, ctx);
   next.tick++;

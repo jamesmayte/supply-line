@@ -381,3 +381,89 @@ describe("room to grow (M1.6): upgrades, moves, new cards", () => {
     return { ...s, cardOffer: offer };
   }
 });
+
+describe("research (M1.4)", () => {
+  const POWER: GameInput[] = [
+    { type: "place", buildingId: "extractor", x: 7, y: 3 }, // 1 coal
+    { type: "place", buildingId: "generator", x: 7, y: 4 }, // 2
+    { type: "link", from: 1, to: 2 }, // 3
+  ];
+  /** Powered labs with packs already loaded (the pack chain is ordinary factory, tested elsewhere). */
+  function labs(n: number, packs = 20): GameState {
+    const tiles = [[6, 5], [6, 4], [5, 5], [6, 3]] as const;
+    let s: GameState = { ...newGame(biome1, MAP, 1), stock: { iron_ingot: 100 } };
+    s = step(s, [...POWER, ...tiles.slice(0, n).map(([x, y]): GameInput => ({ type: "place", buildingId: "lab", x, y }))], DT, ctx);
+    if (s.errors.length) throw new Error(s.errors.join("; "));
+    s = structuredClone(s);
+    for (const lab of s.factory.nodes.filter((x) => x.buildingId === "lab")) lab.inputs = { red_pack: packs };
+    return run(s, 1); // let the generator light
+  }
+  const node = (id: string) => biome1.research.find((r) => r.id === id)!;
+
+  it("a powered lab researches the active node in its content time, using its pack cost", () => {
+    let s = step(labs(1), [{ type: "research", nodeId: "press_plates" }], DT, ctx);
+    const r = node("press_plates");
+    s = run(s, r.time);
+    expect(s.research.done).toEqual(["press_plates"]);
+    expect(s.research.active).toBeNull();
+    const lab = s.factory.nodes.find((x) => x.buildingId === "lab")!;
+    expect(lab.inputs.red_pack).toBeCloseTo(20 - r.cost[0]!.qty, 6);
+  });
+
+  it("more labs research faster, up to the content cap", () => {
+    const r = node("press_plates");
+    const timeWith = (n: number) => {
+      let s = step(labs(n), [{ type: "research", nodeId: "press_plates" }], DT, ctx);
+      let t = 0;
+      while (!s.research.done.length && t < 100) (s = step(s, [], DT, ctx)), (t += DT);
+      return t;
+    };
+    expect(timeWith(2)).toBeCloseTo(r.time / 2, 0);
+    expect(timeWith(4)).toBeCloseTo(r.time / biome1.rules.maxLabs, 0);
+  });
+
+  it("no packs or no power = no progress; it keeps going during a wave", () => {
+    const empty = run(step(labs(1, 0), [{ type: "research", nodeId: "press_plates" }], DT, ctx), 5);
+    expect(empty.research.progress.press_plates ?? 0).toBe(0);
+    expect(empty.factory.nodes.find((x) => x.buildingId === "lab")!.status).toBe("starved");
+    const inWave = run(step(labs(1), [{ type: "research", nodeId: "press_plates" }, { type: "startWave" }], DT, ctx), 5);
+    expect(inWave.research.progress.press_plates).toBeGreaterThan(0.2);
+  });
+
+  it("prerequisites are enforced", () => {
+    expect(step(labs(1), [{ type: "research", nodeId: "cannon_shells" }], DT, ctx).errors[0]).toMatch(/needs Press \+ plates first/);
+  });
+
+  it("locked towers, recipes and link tiers are refused until researched", () => {
+    const s = { ...newGame(biome1, MAP, 1), stock: { iron_ingot: 100, plate: 20 } };
+    expect(step(s, [{ type: "placeTower", towerId: "cannon", x: 6, y: 8 }], DT, ctx).errors[0]).toMatch(/needs research: Cannon \+ shells/);
+    expect(step(s, [{ type: "place", buildingId: "press", x: 6, y: 7 }], DT, ctx).errors[0]).toMatch(/needs research: Press \+ plates/);
+    expect(step(s, [{ type: "place", buildingId: "assembler", x: 6, y: 6, recipeId: "make_shells" }], DT, ctx).errors[0]).toMatch(/Cannon \+ shells/);
+    const two = step(s, [{ type: "place", buildingId: "hub", x: 7, y: 5 }, { type: "placeTower", towerId: "gunner", x: 6, y: 8 }], DT, ctx);
+    expect(step(two, [{ type: "link", from: 1, to: 2, itemId: "bullets", tier: 2 }], DT, ctx).errors[0]).toMatch(/Tier 2 links/);
+    const done = { ...two, research: { ...two.research, done: ["links_t2"] } };
+    expect(step(done, [{ type: "link", from: 1, to: 2, itemId: "bullets", tier: 2 }], DT, ctx).errors).toEqual([]);
+  });
+
+  it("Generator efficiency halves coal use", () => {
+    const burnt = (s: GameState) => {
+      const gen = s.factory.nodes.find((x) => x.buildingId === "generator")!;
+      return gen.inputs.coal ?? 0;
+    };
+    const base = structuredClone(labs(0));
+    base.factory.links = []; // no more coal coming in
+    base.factory.nodes.find((x) => x.buildingId === "generator")!.inputs = { coal: 5 };
+    const eff = structuredClone(base);
+    eff.factory.fuelUse = 0.5;
+    const secs = 8;
+    expect(5 - burnt(run(eff, secs))).toBeCloseTo((5 - burnt(run(base, secs))) / 2, 1);
+  });
+
+  it("Sandbox starts with everything researched", () => {
+    const s = newGame(biome1, MAP, 1, { allResearched: true });
+    expect(s.research.done).toEqual(biome1.research.map((r) => r.id));
+    expect(s.factory.fuelUse).toBe(0.5);
+    const placed = step({ ...s, stock: { plate: 10 } }, [{ type: "placeTower", towerId: "cannon", x: 6, y: 8 }], DT, ctx);
+    expect(placed.errors).toEqual([]);
+  });
+});

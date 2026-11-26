@@ -72,6 +72,8 @@ export interface FactoryState {
   speedMult?: Record<string, number>;
   /** run effect: links carry as if this many tiers higher (capped at the top tier); absent = 0 */
   linkBonus?: number;
+  /** research effect: generators burn this fraction of their content fuel rate; absent = 1 */
+  fuelUse?: number;
 }
 
 export const emptyFactory = (): FactoryState => ({ nextId: 1, nodes: [], links: [] });
@@ -179,7 +181,7 @@ function stepPower(ctx: FactoryCtx, state: FactoryState, dt: number): void {
     if (n.towerId) continue;
     const b = buildingOf(ctx, n);
     if (b.kind !== "generator" || !b.fuel) continue;
-    const need = dt / b.fuel.secondsPerItem;
+    const need = (dt / b.fuel.secondsPerItem) * (state.fuelUse ?? 1);
     const have = n.inputs[b.fuel.itemId] ?? 0;
     n.burning = have >= need - EPS;
     if (n.burning) n.inputs[b.fuel.itemId] = clean(have - need);

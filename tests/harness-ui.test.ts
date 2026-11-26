@@ -72,8 +72,12 @@ describe("drag to link", () => {
     expect(p.route[0]).toEqual({ x: 7, y: 7 });
   });
 
-  it("uses the lowest tier long enough", () => {
-    const p = proposeLink(ctx, base, n(3), n(4));
+  it("uses the lowest researched tier long enough, and says when research is needed", () => {
+    const locked = proposeLink(ctx, base, n(3), n(4)); // 7 tiles: tier 1 reaches 6
+    expect(locked.ok).toBe(false);
+    if (!locked.ok) expect(locked.reason).toBe("too long (7 tiles): needs Tier 2 links research");
+    const researched = { ...base, research: { ...base.research, done: ["links_t2"] } };
+    const p = proposeLink(ctx, researched, n(3), n(4));
     expect(p.ok).toBe(true);
     if (p.ok) expect(p.input).toMatchObject({ tier: 2, itemId: "bullets" });
   });

@@ -21,7 +21,7 @@ function chain(gunTier = 1): GameState {
     { type: "link", from: 4, to: 5 },
     { type: "link", from: 5, to: 6, tier: gunTier },
   ];
-  const s = step(newGame(biome1, "scrapyard_1", 1), cmds, 0.1, ctx);
+  const s = step(newGame(biome1, "scrapyard_1", 1, { allResearched: true }), cmds, 0.1, ctx); // mechanics, not progression
   if (s.errors.length) throw new Error(s.errors.join("; "));
   return s;
 }

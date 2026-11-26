@@ -20,12 +20,12 @@ const COMMON: GameInput[] = [
   { type: "place", buildingId: "hub", x: 7, y: 5 }, // 6
   { type: "placeTower", towerId: "gunner", x: 6, y: 8 }, // 7
   { type: "placeTower", towerId: "gunner", x: 4, y: 8 }, // 8
-  { type: "placeTower", towerId: "gunner", x: 2, y: 7 }, // 9
+  { type: "placeTower", towerId: "gunner", x: 3, y: 7 }, // 9 (6 tiles from the hub: tier-1 reach)
   { type: "link", from: 1, to: 2 }, // 10
   { type: "link", from: 3, to: 4 }, // 11
   { type: "link", from: 4, to: 5 }, // 12
   { type: "link", from: 5, to: 6 }, // 13
-  ...GUNS.map((g): GameInput => ({ type: "link", from: 6, to: g, itemId: "bullets", tier: 2 })), // 14..16
+  ...GUNS.map((g): GameInput => ({ type: "link", from: 6, to: g, itemId: "bullets" })), // 14..16 (tier 1: no research yet)
 ];
 
 /** A script: commands to apply on a given tick of the build break. */
