@@ -9,7 +9,7 @@ import { applyCommands, earlyStartBonus, makeGameCtx, newGame, pickTarget, refun
 import { positionAt, tileCentre } from "../core/path";
 import type { TileXY } from "../core/placement";
 import { createRenderer, effectAlive, ENEMY_STYLE_OF, STATUS_BADGE, type Effect, type Overlay } from "./render";
-import { buildOptions, cardNote, costLabel, inspect, nodeAt, nodeName, proposeLink, waveReport, type WaveStats } from "./ui";
+import { buildOptions, cardNote, costLabel, inspect, nodeAt, nodeName, proposeLink, researchRows, waveReport, type WaveStats } from "./ui";
 
 const MAP = "scrapyard_1";
 const DT = 0.1; // seconds per sim tick (10 Hz)
@@ -23,8 +23,8 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const canvas = $<HTMLCanvasElement>("game");
 const renderer = createRenderer(canvas, ctx, map);
 
-type Mode = "empty" | "A" | "B";
-const SCRIPTS: Record<Mode, Script> = { empty: {}, A: RUN_A, B: RUN_B };
+type Mode = "empty" | "sandbox" | "A" | "B";
+const SCRIPTS: Record<Mode, Script> = { empty: {}, sandbox: {}, A: RUN_A, B: RUN_B };
 
 let mode: Mode = "empty";
 let prev: GameState;
@@ -55,7 +55,7 @@ const HISTORY_TICKS = 50; // 5 s
 
 function reset(next: Mode) {
   mode = next;
-  cur = prev = newGame(biome1, MAP, 1);
+  cur = prev = newGame(biome1, MAP, 1, { allResearched: next === "sandbox" });
   queued = [];
   acc = 0;
   paused = false;
@@ -73,6 +73,7 @@ function tick() {
   prev = cur;
   cur = step(cur, input, DT, ctx);
   reportOutcome(cur);
+  for (const id of cur.research.justDone) toast(`Research done: ${ctx.research.get(id)?.name}. ${ctx.research.get(id)?.text}`, 4000, true);
   shotHistory.push({ tick: cur.tick, shots: new Map(cur.factory.nodes.filter((n) => n.towerId).map((n) => [n.id, n.shots ?? 0])) });
   deriveEffects(prev, cur);
   trackWave(prev, cur);
@@ -149,7 +150,8 @@ const toastEl = $("toast");
 let toastTimer = 0;
 /** Swap content ids (iron_ingot) for display names (iron ingot) in sim messages. */
 const humanize = (text: string) => text.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b|\b[a-z]+\b/g, (w) => ctx.factory.items.get(w)?.name.toLowerCase() ?? w);
-function toast(text: string, ms = 2200) {
+function toast(text: string, ms = 2200, good = false) {
+  toastEl.classList.toggle("good", good);
   toastEl.textContent = humanize(text);
   toastEl.classList.add("show");
   clearTimeout(toastTimer);
@@ -172,8 +174,8 @@ const sheetProblem = $("sheetProblem");
 const sheetCloseBtn = $<HTMLButtonElement>("sheetClose");
 sheetCloseBtn.onclick = () => closeSheet();
 
-interface SheetItem { label: string; note?: string; note2?: string; best?: string; disabled?: boolean; danger?: boolean; card?: boolean; run: () => void }
-type SheetKind = "build" | "node" | "inspect" | "cards" | "help";
+interface SheetItem { label: string; note?: string; note2?: string; best?: string; disabled?: boolean; danger?: boolean; card?: boolean; cls?: string; progress?: number; run: () => void }
+type SheetKind = "build" | "node" | "inspect" | "cards" | "help" | "research";
 let sheetKind: SheetKind | null = null;
 let inspecting: number | null = null;
 
@@ -188,7 +190,7 @@ function openSheet(title: string, items: SheetItem[], tile?: TileXY, kind: Sheet
   sheetOpts.replaceChildren(
     ...items.map((it) => {
       const b = document.createElement("button");
-      b.className = `opt${it.danger ? " danger" : ""}${it.card ? " card" : ""}`;
+      b.className = `opt${it.danger ? " danger" : ""}${it.card ? " card" : ""}${it.cls ? ` ${it.cls}` : ""}`;
       b.disabled = !!it.disabled;
       b.append(it.label);
       for (const text of [it.note, it.note2]) {
@@ -196,6 +198,14 @@ function openSheet(title: string, items: SheetItem[], tile?: TileXY, kind: Sheet
         const span = document.createElement("span");
         span.textContent = text;
         b.append(span);
+      }
+      if (it.progress !== undefined) {
+        const bar = document.createElement("span");
+        bar.className = "bar-mini";
+        const fill = document.createElement("i");
+        fill.style.width = `${Math.round(it.progress * 100)}%`;
+        bar.append(fill);
+        b.append(bar);
       }
       if (it.best) {
         b.classList.add("recommended");
@@ -246,9 +256,43 @@ function openInspect(n: FactoryNode) {
     run: () => startMove(n),
   });
   items.push({ label: "Remove / unlink…", note: "or hold the building", run: () => openNodeMenu(n) });
+  if (b?.kind === "lab") items.unshift({ label: "Research…", note: researchNote(), run: () => openResearch() });
   openSheet("", items, n, "inspect");
   inspecting = n.id;
   refreshInspect();
+}
+
+/* ---------- research (M1.4) ---------- */
+function researchNote(): string {
+  const a = cur.research.active ? ctx.research.get(cur.research.active) : undefined;
+  return a ? `${a.name} ${Math.floor((cur.research.progress[a.id] ?? 0) * 100)}%` : "choose what to research";
+}
+
+/** Pick what the labs work on: done ✓, active with progress, available, or locked (needs …). */
+function openResearch() {
+  const rows = researchRows(ctx, cur);
+  openSheet(
+    "Research",
+    rows.map((r) => ({
+      label: r.state === "done" ? `✓ ${r.name}` : r.name,
+      note: r.text,
+      note2: r.state === "done" ? "done" : r.state === "locked" ? r.needs : r.state === "active" ? `researching · ${Math.floor(r.progress * 100)}%` : `${r.cost}${r.progress > 0 ? ` · ${Math.floor(r.progress * 100)}% done` : ""}`,
+      disabled: r.state === "done" || r.state === "locked",
+      cls: r.state,
+      progress: r.state === "active" || r.progress > 0 ? r.progress : undefined,
+      run: () => send({ type: "research", nodeId: r.id }),
+    })),
+    undefined,
+    "research",
+  );
+  const labs = cur.factory.nodes.filter((n) => n.buildingId === "lab");
+  const hint = document.createElement("div");
+  hint.className = "problem";
+  hint.style.display = "block";
+  hint.textContent = labs.length
+    ? "Labs need power and red science packs (Assembler: red science pack = 1 ingot + 1 coal). More labs research faster, up to 3."
+    : "Build a Lab first, power it, and link red science packs into it.";
+  sheetExtra.replaceChildren(hint);
 }
 
 const fmtX = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0$/, ""));
@@ -265,7 +309,7 @@ function finishMove(t: TileXY) {
   moving = null;
   overlay = {};
   if (t.x === n.x && t.y === n.y) return toast("Move cancelled");
-  toast(`Moved ${nodeName(ctx, n)}`); // replaced by the reason if the sim refuses it
+  toast(`Moved ${nodeName(ctx, n)}`, 2200, true); // replaced by the reason if the sim refuses it
   send({ type: "move", nodeId: n.id, x: t.x, y: t.y });
 }
 
@@ -335,6 +379,7 @@ function openHelp() {
     "Smelters and Assemblers need power: a Generator (P) fed with coal, within 3 tiles.",
     "Gunners only shoot while they have bullets. Tap any building to see what it's doing and what's holding it back.",
     "Start wave when ready. After each wave, pick a card: the report tells you which one helps most.",
+    "Research unlocks the Cannon (beats armour), the Press and better links: build a Lab, feed it red science packs, tap it to choose.",
   ]) {
     const li = document.createElement("li");
     li.textContent = t;
@@ -370,6 +415,15 @@ function openHelp() {
 }
 $("help").onclick = () => (sheetKind === "help" ? closeSheet() : openHelp());
 
+/** Why you can't afford something, and how to get it: anything but the starting ingots has to reach a hub. */
+function shortHint(cost: readonly { itemId: string; qty: number }[]): string {
+  const missing = cost.find((c) => spendable(cur, ctx, c.itemId) < c.qty - 1e-9);
+  if (!missing) return "can't afford";
+  const name = (ctx.factory.items.get(missing.itemId)?.name ?? missing.itemId).toLowerCase();
+  const plural = name.endsWith("s") ? name : `${name}s`;
+  return missing.itemId === "iron_ingot" ? "can't afford" : `make ${plural} and link them into a hub`;
+}
+
 function openBuildMenu(t: TileXY) {
   const opts = buildOptions(ctx, cur, t.x, t.y);
   if (!opts.length) {
@@ -380,7 +434,7 @@ function openBuildMenu(t: TileXY) {
     "Build",
     opts.map((o) => ({
       label: o.label,
-      note: o.affordable ? costLabel(ctx, o.cost) : `${costLabel(ctx, o.cost)} · can't afford`,
+      note: o.locked ? `needs ${o.locked} research` : o.affordable ? costLabel(ctx, o.cost) : `${costLabel(ctx, o.cost)} · ${shortHint(o.cost)}`,
       disabled: !o.affordable,
       run: () => send(o.input),
     })),
@@ -481,12 +535,13 @@ canvas.addEventListener("pointercancel", (e) => endGesture(e, true));
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 /* ---------- HUD ---------- */
-const hud = { wave: $("wave"), core: $("core"), ingots: $("ingots"), kills: $("kills"), next: $("next") };
+const hud = { wave: $("wave"), core: $("core"), ingots: $("ingots"), kills: $("kills"), next: $("next"), research: $("researchLine") };
 const result = { el: $("result"), title: $("resultTitle"), stars: $("resultStars"), text: $("resultText") };
 $("restart").onclick = () => reset(mode);
 let lastInspectRefresh = 0;
 const buttons = {
   empty: $<HTMLButtonElement>("demoEmpty"),
+  sandbox: $<HTMLButtonElement>("demoSandbox"),
   A: $<HTMLButtonElement>("demoA"),
   B: $<HTMLButtonElement>("demoB"),
   start: $<HTMLButtonElement>("start"),
@@ -510,6 +565,8 @@ function syncHud() {
   hud.kills.textContent = String(cur.kills);
   hud.next.textContent =
     cur.phase === "build" ? `Next: ${waveSummary(cur.waveIndex)}` : cur.phase === "wave" ? `Now: ${waveSummary(cur.waveIndex)}` : "";
+  const active = cur.research.active ? ctx.research.get(cur.research.active) : undefined;
+  hud.research.textContent = active ? `Researching ${active.name}: ${Math.floor((cur.research.progress[active.id] ?? 0) * 100)}%` : "";
   const pending = queued.some((q) => q.type === "startWave");
   buttons.start.disabled = cur.phase !== "build" || pending || !!cur.cardOffer;
   const bonus = cur.phase === "build" ? earlyStartBonus(cur, ctx).qty : 0;
@@ -533,6 +590,7 @@ function syncHud() {
 
 function syncButtons() {
   buttons.empty.classList.toggle("on", mode === "empty");
+  buttons.sandbox.classList.toggle("on", mode === "sandbox");
   buttons.A.classList.toggle("on", mode === "A");
   buttons.B.classList.toggle("on", mode === "B");
   buttons.pause.textContent = paused ? "Play" : "Pause";
@@ -541,6 +599,10 @@ function syncButtons() {
 }
 
 buttons.empty.onclick = () => reset("empty");
+buttons.sandbox.onclick = () => {
+  reset("sandbox");
+  toast("Sandbox: all research done, so every tower, recipe and link tier is available", 3500);
+};
 buttons.A.onclick = () => reset("A");
 buttons.B.onclick = () => reset("B");
 buttons.start.onclick = () => {
