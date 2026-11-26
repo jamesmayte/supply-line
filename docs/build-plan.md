@@ -89,8 +89,9 @@ later waves get hard, and coming back with meta upgrades makes them passable.
 - Port-slot notches; links drawn in side-by-side lanes with smarter bends; tier borders and pips.
 - Why: James ran out of map space, couldn't see free link slots, and speed cards never helped.
 
-### M1.4 — Research (minimal)
-- Lab building, red science pack recipe, 4–6 research nodes from content.
+### M1.4 — Research (minimal) ✅
+- Lab building, red science pack recipe, 5 research nodes from content (Press, Cannon + shells, link tiers 2/3,
+  generator efficiency). Locked items gated in the sim and shown greyed in the build menu. Sandbox mode.
 
 **Phase 1 gate (James playtests on his phone):** is one 15-wave map fun with no meta? If not, fix ratios,
 pacing and feedback before anything else. Write the verdict in HANDOFF.md.

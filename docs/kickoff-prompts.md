@@ -57,6 +57,19 @@ Do M1.3: full 15-wave run loop with build breaks, placeholder cards, inspect she
 Do M1.4: Lab, red science packs and 4–6 research nodes from content. Deploy, then hand back for my Phase 1 playtest.
 ```
 
+## New session (use this to continue from any point)
+
+```
+You're continuing Supply Line in jamesmayte/supply-line. GitHub main is the source of truth; there's no chat
+history. Read CLAUDE.md, HANDOFF.md (especially the latest playtest notes, "Decisions in M1.x" and "Next"),
+and docs/build-plan.md. Then tell me in 5 bullets max: where we are, what you'd do next and why, and anything
+in HANDOFF that looks stale. Wait for my go before changing code. Work on a fresh branch from main, keep
+npm test / npm run typecheck green, check UI changes on an emulated phone and send screenshots, update
+HANDOFF.md at the end, and open a PR when I ask.
+
+New feedback since the last session: <paste playtest notes / screenshots here, or "none">
+```
+
 ## Handy one-liners
 
 - Review: `Review /core against the invariants in CLAUDE.md and list anything that breaks them.`

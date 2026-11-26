@@ -305,10 +305,54 @@ https://jamesmayte.github.io/supply-line/ (after merge).
 4. Look at the hub's links in **Demo: 2 chains**: they run side by side now.
 5. Does speeding things up feel worth it now? Is the layout easier to manage?
 
+- **M1.4 done** (research):
+  - **Labs** (6 ingots, need power) research one node at a time, using red science packs from an assembler
+    (1 ingot + 1 coal → 1 pack, 5 s). Each powered lab with packs adds speed, up to `rules.maxLabs` (3).
+    Research keeps going during waves; switching keeps progress on the old node.
+  - **Nodes** (content, schema-validated): Press + plates (10 packs, 20 s) · Tier 2 links (15, 25 s) ·
+    **Cannon + shells** (20, 30 s, needs Press) · Generator efficiency (10, 20 s: generators burn half the coal) ·
+    Tier 3 links (30, 40 s, needs Tier 2).
+  - **Gating:** locked towers, recipes and link tiers are refused by the sim ("needs research: …").
+    Tier 2/3 links now need research, which fixes the free tier-2 links flagged in M1.2.
+  - **Lab cost is ingots** (was plates: plates need the Press, which needs research, which needs a Lab).
+  - **Armoured restored** (waves 7, 11, 13, 15) now that shells (armour-piercing, splash) exist.
+  - **Demo builds use tier-1 links** (third Gunner moved (2,7) → (3,7) to stay within 6 tiles). Interlock still
+    holds: A lost on wave 8, B on wave 11 (more core HP than before). Opening still clears waves 1–4.
+  - **UI:** tap a Lab → **Research…** sheet (done ✓ / active with progress bar / cost / "needs …"); a
+    "Researching X: 45%" line in the top bar; a green toast when research finishes. The build menu now lists
+    locked things **greyed at the end** with "needs Cannon + shells research" so you can see what's coming.
+    "Can't afford" explains non-ingot costs ("make iron plates and link them into a hub"). Success toasts are green.
+  - **Sandbox** mode (bottom bar): every research done from the start, for judging the full toolset.
+  - Tests: research flow, lab cap, power/packs, prerequisites, gating, generator efficiency, Sandbox, locked
+    build options, research rows. Total 144 green, typecheck clean.
+  - Checked on an emulated iPhone 13: built a red-pack chain into a Lab by commands, chose Press + plates on the
+    Lab's sheet, it finished (~51 s game time) with the toast, the build menu then offered the Press with the
+    Cannon greyed; Sandbox offered everything. No page errors.
+  - **Not yet checked:** a scripted run that builds a shells chain and Cannons. Whether the Cannon path makes
+    late waves (and the restored Armoured) winnable is for James's playtest.
+
+### Progression (James asked: are towers a staggered roll-out?)
+
+Yes. Two layers in the spec: **campaign** unlocks (Gunner from the start, Cannon map 2, Flak map 3, Arc coil
+map 5, Launcher biome 2; plus the meta tree) and **in-run research** (even when a tower exists on a map you
+research it during the run; packs spent on research aren't spent on ammo, the run's main tension). With one map
+so far, research is the progression. **Sandbox** lets you judge "everything from the start" side by side.
+
+### What to try on the phone (M1.4)
+
+https://jamesmayte.github.io/supply-line/ (after merge).
+1. On **Empty**: build a powered chain that ends in **Assembler: red science pack** (needs iron ingots *and* coal
+   linked in), then a **Lab** next to the generator, and link the assembler into the Lab.
+2. **Tap the Lab → Research…** → Press + plates, then Cannon + shells. Watch the top-bar progress.
+3. Build a Press → plates, a Coal mill → powder, **Assembler: shells** (plate + powder), then a **Cannon**.
+   Cannons cost plates: link plates into a hub so you can spend them.
+4. Try **Sandbox** to play with everything unlocked from wave 1. Which feels better?
+
 ## Next
 
-**M1.4 — Research (minimal)**: Lab, red science pack, 4–6 research nodes (Cannon + shells, link tiers, …).
-Then re-run the Phase 1 check.
+**Phase 1 check again (James):** play a run on Empty (with research) and one on Sandbox. Is it fun? Is the
+Cannon worth the research detour? Write the verdict here. Candidate follow-ups (pick after the playtest):
+tutorial maps (spec maps 1–3), save/resume, juice round 2 (haptics, flow overlay, wave preview icons), map scrolling.
 
 ## Decisions so far
 
@@ -353,6 +397,15 @@ Then re-run the Phase 1 check.
 
 - Biome 1 enemy HP doubled (walker 80, swarmer 24, armoured 240). The M0.5 sanity table predates this.
 - The interlock scenario uses 3 Gunners so that ammo, not tower count, is the binding constraint.
+
+## Decisions in M1.4 (easy to change, flag if wrong)
+
+- Research progress per tick = (labs working × dt) / node time; each working lab uses cost × dt/time packs.
+- A lab counts only if powered and holding enough packs for the tick; labs beyond `maxLabs` show idle.
+- Gating lives in the game layer (`lockedBy` in `core/game.ts`); the factory layer stays research-agnostic.
+- Card "Wider links" can still lift a link above your researched tier (it's a reward).
+- Locked build options are shown (greyed, last) rather than hidden, so progression is visible.
+- Sandbox = `newGame(..., { allResearched: true })`; same map, stock and waves.
 
 ## Decisions in M1.6 (easy to change, flag if wrong)
 
@@ -423,6 +476,15 @@ Then re-run the Phase 1 check.
 
 - Repo is **public during Phases 0–1** for free GitHub Pages; switch back to **private before Phase 2**
   (see build-plan). Keep secrets, paid assets and signing keys out while public.
+
+## Starting a new session (no chat history needed)
+
+GitHub is the source of truth: everything that matters is on `main` once PRs are merged. Chat history is not.
+- `CLAUDE.md`: rules and invariants (read automatically).
+- `HANDOFF.md` (this file): what's done, decisions, playtest verdicts, what's next.
+- `docs/build-plan.md`: milestones; `docs/game-spec.md`: the design.
+- Paste the "New session" prompt from `docs/kickoff-prompts.md` and add any new feedback.
+- If a PR is still open, merge it first, or tell the session which branch to continue from.
 
 ## One-time setup (James)
 
